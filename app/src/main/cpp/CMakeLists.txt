@@ -36,6 +36,16 @@ if(SVCAM_ENABLE_VULKAN AND SVCAM_VULKAN_HEADERS_DIR)
     target_include_directories(ggml-vulkan PRIVATE "${SVCAM_VULKAN_HEADERS_DIR}")
 endif()
 
+# The pinned ggml-vulkan source uses Android POSIX APIs such as getpagesize/pread
+# but does not include <unistd.h> on its Android path. Force a tiny compatibility
+# header into that target instead of modifying the llama.cpp submodule itself.
+if(SVCAM_ENABLE_VULKAN AND ANDROID)
+    target_compile_options(
+        ggml-vulkan PRIVATE
+        "-include${CMAKE_CURRENT_SOURCE_DIR}/vulkan_android_compat.h"
+    )
+endif()
+
 # The native bridge originally used the CPU-safe profile. Keep that source readable,
 # but generate the actual Vulkan build from it so this Android profile offloads both
 # the Gemma transformer layers and mtmd vision encoder to the Vulkan backend.

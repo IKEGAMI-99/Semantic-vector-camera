@@ -3,11 +3,23 @@ package com.ikegami.svcam.logging
 import android.content.Context
 import android.os.Build
 import com.ikegami.svcam.BuildConfig
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+
+data class LiveLogEvent(
+    val time: Instant,
+    val level: String,
+    val module: String,
+    val event: String,
+    val fields: Map<String, Any?>,
+)
 
 object AppLogger {
     private val lock = Any()
@@ -15,6 +27,13 @@ object AppLogger {
     private lateinit var logDir: File
     private lateinit var appLog: File
     private lateinit var crashLog: File
+
+    private val _events = MutableSharedFlow<LiveLogEvent>(
+        replay = 64,
+        extraBufferCapacity = 192,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val events: SharedFlow<LiveLogEvent> = _events.asSharedFlow()
 
     fun init(context: Context) {
         synchronized(lock) {
@@ -103,18 +122,29 @@ object AppLogger {
     }
 
     private fun write(level: String, module: String, event: String, fields: Map<String, Any?>) {
+        val timestamp = Instant.now()
+        val fieldSnapshot = fields.toMap()
         synchronized(lock) {
             if (!::appLog.isInitialized) return
             val json = JSONObject().apply {
-                put("time", Instant.now().toString())
+                put("time", timestamp.toString())
                 put("level", level)
                 put("module", module)
                 put("event", event)
-                fields.forEach { (key, value) -> put(key, value ?: JSONObject.NULL) }
+                fieldSnapshot.forEach { (key, value) -> put(key, value ?: JSONObject.NULL) }
             }
             appLog.appendText(json.toString() + "\n")
             if (appLog.length() > 5L * 1024L * 1024L) rotate()
         }
+        _events.tryEmit(
+            LiveLogEvent(
+                time = timestamp,
+                level = level,
+                module = module,
+                event = event,
+                fields = fieldSnapshot,
+            )
+        )
     }
 
     private fun rotate() {

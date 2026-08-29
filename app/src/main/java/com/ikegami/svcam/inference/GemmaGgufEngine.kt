@@ -37,8 +37,24 @@ class GemmaGgufEngine : VisionInferenceEngine {
     }
 
     override suspend fun analyze(bitmap: Bitmap, prompt: String): InferenceResult = withContext(Dispatchers.Default) {
+        AppLogger.info(
+            "IMAGE",
+            "vision_frame_prepare",
+            mapOf("width" to bitmap.width, "height" to bitmap.height),
+        )
         val prepared = scaleForVision(bitmap)
+        AppLogger.info(
+            "IMAGE",
+            "vision_frame_prepared",
+            mapOf(
+                "width" to prepared.width,
+                "height" to prepared.height,
+                "scaled" to (prepared !== bitmap),
+            ),
+        )
         val rgb = bitmapToRgb(prepared)
+        AppLogger.info("IMAGE", "rgb_buffer_ready", mapOf("bytes" to rgb.size))
+
         val start = System.nanoTime()
         AppLogger.info("GEMMA", "inference_start", mapOf("width" to prepared.width, "height" to prepared.height))
         try {

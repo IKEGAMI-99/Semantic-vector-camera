@@ -16,7 +16,7 @@ val hasReleaseSigning = listOf(
 android {
     namespace = "com.ikegami.svcam"
     compileSdk = 37
-    ndkVersion = "28.1.13356709"
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.ikegami.svcam"

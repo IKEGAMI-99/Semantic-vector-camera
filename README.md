@@ -90,7 +90,7 @@ Toolchain baseline:
 - AGP 9.3.0
 - Gradle 9.5.0
 - JDK 21 in CI
-- NDK 28.1.13356709
+- NDK 28.2.13676358
 - CMake 3.22.1
 - Jetpack Compose BOM 2026.08.00
 - CameraX 1.6.2

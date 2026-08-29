@@ -28,10 +28,13 @@ jobs:
           cmdline-tools-version: 15859902
           packages: platform-tools
 
-      - name: Install Android SDK 37
+      - name: Install Android toolchain
         run: |
-          android --sdk="$ANDROID_HOME" sdk install platforms/android-37 build-tools/36.0.0
-          sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"
+          sdkmanager \
+            "platforms;android-37" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
 
       - uses: gradle/actions/setup-gradle@v4
         with:

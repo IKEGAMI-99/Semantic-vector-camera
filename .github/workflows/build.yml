@@ -28,11 +28,9 @@ jobs:
           cmdline-tools-version: 15859902
           packages: platform-tools
 
-      - name: Install Android toolchain
+      - name: Install native Android toolchain
         run: |
           sdkmanager \
-            "platforms;android-37" \
-            "build-tools;36.0.0" \
             "ndk;28.2.13676358" \
             "cmake;3.22.1"
 

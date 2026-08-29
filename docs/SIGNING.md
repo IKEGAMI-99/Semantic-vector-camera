@@ -1,44 +1,44 @@
-# Release signing / in-app update setup
+# Personal release signing / in-app update
 
-Semantic Vector Camera のアプリ内アップデートを成立させるには、**最初の正式Releaseから同じ Android 署名鍵を使い続けること**が必須です。
+Semantic Vector Camera は個人配布前提なので、署名設定を最小化しています。
 
-Android は package 名と署名が一致する APK だけを既存アプリへの更新として受け入れます。Debug APK は `com.ikegami.svcam.debug`、Release APK は `com.ikegami.svcam` なので、Debug版からRelease版への初回移行だけは手動インストールが必要です。
+必要な GitHub Secret は **1個だけ**です。
 
-## 必須設定
+```text
+ANDROID_KEYSTORE_BASE64
+```
 
-GitHub Repository の
+alias と password は Personal Release Workflow 側で固定しています。
 
-`Settings > Secrets and variables > Actions > Repository secrets`
+```text
+alias    = svcam
+password = svcam-personal-release
+```
 
-に、以下の4つを登録してください。
+Android は package 名と署名が同じ APK だけを既存アプリへの更新として受け入れます。そのため、最初に作った `svcam-release.jks` は今後も同じものを使い続けます。
 
-| Secret名 | 内容 |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | `svcam-release.jks` を Base64 化した文字列 |
-| `ANDROID_KEYSTORE_PASSWORD` | keystore のパスワード |
-| `ANDROID_KEY_ALIAS` | 署名キーの alias。例: `svcam` |
-| `ANDROID_KEY_PASSWORD` | alias の秘密鍵パスワード |
+## 1. 署名鍵を一度だけ作る
 
-この4値、特に keystore は**初回正式Release後に変更しないでください**。紛失すると、既存インストールへ同一アプリとして更新できなくなります。
-
-## 1. Keystore を一度だけ作成する
-
-PC または Android の Termux など、`keytool` が使える環境で一度だけ作成します。
+Termux / Linux / macOS など `keytool` が使える環境で実行します。
 
 ```bash
-keytool -genkeypair \
+keytool -genkeypair -v \
   -keystore svcam-release.jks \
+  -storetype JKS \
   -alias svcam \
   -keyalg RSA \
   -keysize 4096 \
-  -validity 10000
+  -validity 10000 \
+  -storepass 'svcam-personal-release' \
+  -keypass 'svcam-personal-release' \
+  -dname "CN=Semantic Vector Camera, OU=Android, O=IKEGAMI-99, C=JP"
 ```
 
-`svcam-release.jks` は Git にコミットしません。安全な場所へバックアップしてください。
+この `svcam-release.jks` は Git にコミットしません。バックアップだけ取ってください。
 
-## 2. Keystore を Base64 化する
+## 2. Base64 にする
 
-Linux / Termux:
+Termux / Linux:
 
 ```bash
 base64 -w 0 svcam-release.jks > svcam-release.jks.b64
@@ -50,118 +50,92 @@ macOS:
 base64 -i svcam-release.jks | tr -d '\n' > svcam-release.jks.b64
 ```
 
-`svcam-release.jks.b64` の中身を GitHub Secret `ANDROID_KEYSTORE_BASE64` に貼り付けます。
+表示:
 
-元の `.jks` とパスワードは別々の安全な場所にも保存してください。
+```bash
+cat svcam-release.jks.b64
+```
 
-## 3. GitHub Actions Secrets を登録する
+## 3. GitHub Secret を1個だけ登録
 
-GitHub の Repository 画面で以下を開きます。
+Repository:
 
-1. `Settings`
-2. `Secrets and variables`
-3. `Actions`
-4. `New repository secret`
+```text
+Settings
+→ Secrets and variables
+→ Actions
+→ New repository secret
+```
 
-以下を1つずつ登録します。
+Name:
 
 ```text
 ANDROID_KEYSTORE_BASE64
-ANDROID_KEYSTORE_PASSWORD
-ANDROID_KEY_ALIAS
-ANDROID_KEY_PASSWORD
 ```
 
-現在の `.github/workflows/release.yml` はこの4つが1つでも欠けていると `Validate signing secrets` で停止します。
-
-## 4. Release APK を作る
-
-現在の Release Workflow は `main` のアプリ関連ファイルが更新されるたび、または `workflow_dispatch` で手動実行したときに署名済み Release APK を作ります。
-
-Release version は Workflow 内で自動生成されます。
+Value:
 
 ```text
-versionName = 0.2.<GitHub Actions run number>
-versionCode = <GitHub Actions run number>
+svcam-release.jks.b64 の中身全部
 ```
 
-成功すると GitHub Releases の Latest Release に次の2ファイルが公開されます。
+これで署名設定は終了です。
+
+## 4. 以後は自動
+
+`main` にアプリ関連の変更が入ると Release Workflow が自動で以下を実行します。
 
 ```text
-SemanticVectorCamera-vX.Y.Z.apk
-SemanticVectorCamera-vX.Y.Z.apk.sha256
+同じ署名鍵を復元
+↓
+versionName / versionCode を自動更新
+↓
+Release APK をビルド
+↓
+SHA-256 を作成
+↓
+GitHub Latest Release に公開
 ```
 
-アプリ内Updaterは GitHub Releases の `latest` API を確認し、この2ファイルを使用します。
-
-## 5. 最初の Release 版だけ手動インストールする
-
-開発中の Debug APK は package 名と署名が異なるため、Release APKへそのまま上書きできません。
-
-最初の一度だけ次の手順で移行します。
-
-1. 必要なら Debug 版の設定やログを退避
-2. Debug版をアンインストール
-3. GitHub Releases から署名済み Release APK をダウンロード
-4. Release APK をインストール
-
-以後、同じ keystore で作られた新しい Release APK はアプリ内Updaterから更新できます。
-
-## 6. Android 側の「この提供元を許可」
-
-アプリ内Updaterが APK をAndroid標準インストーラへ渡すには、端末側で Semantic Vector Camera に「不明なアプリのインストール」を許可する必要があります。
-
-Updater は権限がOFFの場合、自動で Android の設定画面を開きます。
-
-そこで
+公開物:
 
 ```text
-この提供元を許可
+SemanticVectorCamera-v0.2.x.apk
+SemanticVectorCamera-v0.2.x.apk.sha256
 ```
 
-をONにしてアプリへ戻り、もう一度インストールを実行してください。
+アプリ内Updaterは Latest Release を確認して、APKをダウンロード、SHA-256確認後にAndroid標準インストーラを起動します。
 
-Manifest には既に次の権限が入っています。
+## 最初の1回だけ
 
-```xml
-<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+Debug APK は `com.ikegami.svcam.debug`、Personal Release は `com.ikegami.svcam` なので、最初の移行だけ上書きできません。
+
+```text
+Debug版をアンインストール
+↓
+最初のPersonal Release APKを手動インストール
+↓
+以後はアプリ内アップデート
 ```
 
-APK は `FileProvider` 経由で Android 標準 Package Installer へ渡します。
+Android側では初回だけ「この提供元を許可」をONにしてください。
 
-## 7. アプリ内Updaterの動作
+## バージョン表記
 
-Updaterは次の順番で処理します。
+`SVCAM-896-V1` の `V1` は **アプリのバージョンではなく896DフォーマットのSchema version** です。
 
-1. GitHub Releases `latest` を取得
-2. `tag_name` と現在の `BuildConfig.VERSION_NAME` を比較
-3. Release APK と `.apk.sha256` を探す
-4. APK をダウンロード
-5. SHA-256 を検証
-6. Android の「不明なアプリのインストール」権限を確認
-7. Android 標準 Package Installer を起動
-8. Android OS が package 名と署名を最終検証
+アプリの実際のバージョンは `BuildConfig.VERSION_NAME` を使い、Processing Console と Settings に例えば次のように表示します。
 
-アプリ自身が署名検証を迂回して強制インストールすることはありません。
+```text
+v0.2.31-debug · SVCAM-896-V1
+```
 
-## 更新が動くためのチェックリスト
+Debug CI / Personal Release とも、GitHub Actions の run number から versionName / versionCode を自動更新します。
 
-- [ ] `ANDROID_KEYSTORE_BASE64` を登録済み
-- [ ] `ANDROID_KEYSTORE_PASSWORD` を登録済み
-- [ ] `ANDROID_KEY_ALIAS` を登録済み
-- [ ] `ANDROID_KEY_PASSWORD` を登録済み
-- [ ] Release Workflow が成功している
-- [ ] GitHub Releases に `.apk` がある
-- [ ] 同じ Release に `.apk.sha256` がある
-- [ ] 端末には Debug版ではなく Release版をインストールしている
-- [ ] Android の「この提供元を許可」がON
-- [ ] 新Releaseの `versionCode` が現在のアプリより大きい
-- [ ] keystore を以前のReleaseから変更していない
+## 絶対に消さないもの
 
-## 重要: keystore を失った場合
+```text
+svcam-release.jks
+```
 
-GitHub Secrets は登録後に値を読み戻せません。
-
-そのため `svcam-release.jks` 本体とパスワードは GitHub Secrets だけに依存せず、安全なオフライン保管先にもバックアップしてください。
-
-同じ package 名 `com.ikegami.svcam` を維持したまま署名鍵を失うと、既存ユーザーへ通常のAPK更新を配布できなくなります。
+これだけは安全な場所にバックアップしてください。同じ鍵を失うと、既にインストール済みのPersonal Releaseへ上書き更新できなくなります。

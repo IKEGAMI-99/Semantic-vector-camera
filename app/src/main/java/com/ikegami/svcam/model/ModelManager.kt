@@ -13,7 +13,10 @@ data class ModelConfig(
     val mmprojPath: String,
     val mmprojName: String,
 ) {
-    val ready: Boolean get() = modelPath.isNotBlank() && mmprojPath.isNotBlank()
+    val ready: Boolean
+        get() = modelPath.isNotBlank() && mmprojPath.isNotBlank() &&
+            File(modelPath).isFile && File(modelPath).length() > 1024L &&
+            File(mmprojPath).isFile && File(mmprojPath).length() > 1024L
 }
 
 enum class ModelPart { MODEL, MMPROJ }

@@ -36,12 +36,14 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DSVCAM_ENABLE_VULKAN=ON",
                 )
-                // GitHub Actions installs the host shader compiler / SPIR-V headers.
-                // Local desktop builds can instead rely on their installed Vulkan SDK.
+                // GitHub Actions installs the host shader compiler and copies only
+                // the platform-agnostic Vulkan headers into an isolated include root.
+                // Do not add /usr/include wholesale to an Android cross-compile.
                 if (isGitHubActions) {
                     arguments += listOf(
                         "-DVulkan_GLSLC_EXECUTABLE=/usr/bin/glslc",
                         "-DSPIRV-Headers_DIR=/usr/share/cmake/SPIRV-Headers",
+                        "-DSVCAM_VULKAN_HEADERS_DIR=/tmp/svcam-vulkan-headers",
                     )
                 }
             }

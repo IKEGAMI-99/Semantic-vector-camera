@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ikegami.svcam.BuildConfig
 import com.ikegami.svcam.logging.LiveLogEvent
 import kotlinx.coroutines.delay
 import java.time.Duration
@@ -88,7 +89,7 @@ fun ProcessingConsole(
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
-                "SVCAM-896-V1",
+                "v${BuildConfig.VERSION_NAME} · SVCAM-896-V1",
                 color = terminalSecondary,
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.labelMedium,
@@ -193,17 +194,32 @@ private fun terminalLine(event: LiveLogEvent): String {
     val module = event.module.take(10).padEnd(10)
     val message = when (event.event) {
         "capture_requested" -> "Shutter accepted / semantic capture started"
+        "gallery_import_requested" -> "Gallery image accepted / semantic capture started"
+        "gallery_image_loaded" -> "Gallery bitmap loaded ${event.field("width")}x${event.field("height")}"
         "frame_captured" -> "Frame acquired ${event.field("width")}x${event.field("height")} rot=${event.field("rotation")}"
-        "vision_frame_prepare" -> "Preparing camera frame ${event.field("width")}x${event.field("height")}"
+        "vision_frame_prepare" -> "Preparing source frame ${event.field("width")}x${event.field("height")}"
         "vision_frame_prepared" -> "Vision input ${event.field("width")}x${event.field("height")} scaled=${event.field("scaled")}"
         "rgb_buffer_ready" -> "RGB buffer ready bytes=${event.field("bytes")}"
         "model_load_start" -> "Loading ${event.field("model")} / projector ${event.field("mmproj")}"
         "model_load_complete" -> "Model ready in ${event.field("duration_ms")} ms"
         "inference_start" -> "Gemma vision inference started / max ${event.field("n_predict")} tokens"
+        "kv_cache_cleared" -> "KV cache cleared"
         "native_bitmap_ready" -> "Native bitmap ready / ${event.field("elapsed_ms")} ms"
+        "chat_template_ready" -> "Chat template ready / chars=${event.field("current")}"
         "native_tokenize_start" -> "Tokenizing multimodal prompt"
-        "native_tokenize_complete" -> "Multimodal prompt tokenized / ${event.field("elapsed_ms")} ms"
-        "vision_eval_start" -> "Vision encoder + prompt prefill started"
+        "native_tokenize_complete" -> "Multimodal prompt tokenized / tokens=${event.field("current")} positions=${event.field("total")} / ${event.field("elapsed_ms")} ms"
+        "vision_plan_ready" -> "Vision plan ready / chunks=${event.field("current")} tokens=${event.field("total")}"
+        "vision_eval_start" -> "Multimodal evaluation started"
+        "vision_chunk_start" -> "Chunk ${event.field("current")}/${event.field("total")} started"
+        "vision_chunk_shape" -> "Chunk shape tokens=${event.field("current")} positions=${event.field("total")}"
+        "vision_text_prefill_start" -> "Text prefill started / tokens=${event.field("current")}"
+        "vision_text_prefill_complete" -> "Text prefill complete / positions=${event.field("current")} / ${event.field("elapsed_ms")} ms"
+        "vision_image_encode_start" -> "Vision encoder started / image tokens=${event.field("current")} positions=${event.field("total")}"
+        "vision_image_encode_complete" -> "Vision encoder complete / ${event.field("elapsed_ms")} ms"
+        "vision_image_llm_prefill_start" -> "Image embeddings -> Gemma prefill started"
+        "vision_image_llm_prefill_complete" -> "Image prefill complete / positions=${event.field("current")} / ${event.field("elapsed_ms")} ms"
+        "vision_chunk_complete" -> "Chunk ${event.field("current")}/${event.field("total")} complete"
+        "native_heartbeat" -> "Still working / ${nativeStageLabel(event.field("stage"))} / wall=${event.field("wall_elapsed_ms")} ms"
         "vision_eval_complete" -> "Vision/prefill complete / n_past=${event.field("current")} / ${event.field("elapsed_ms")} ms"
         "generation_start" -> "Semantic JSON generation started / max=${event.field("total")}"
         "generation_progress" -> "Generating JSON token ${event.field("current")}/${event.field("total")} / ${event.field("elapsed_ms")} ms"
@@ -215,9 +231,9 @@ private fun terminalLine(event: LiveLogEvent): String {
         "encoding_start" -> "Encoding fixed SVCAM-896-V1 layout"
         "vector_valid" -> "Vector valid ${event.field("dimensions")}/896 / objects=${event.field("objects")}"
         "capture_saved" -> "Semantic memory written ${event.field("file")} (${event.field("bytes")} bytes)"
-        "original_frame_destroyed" -> "Original camera Bitmap destroyed"
+        "original_frame_destroyed" -> "Source Bitmap destroyed"
         "semantic_memory_complete" -> "MEMORY COMPLETE / ${event.field("objects")} objects"
-        "capture_failed", "processing_failed" -> event.field("message").ifBlank { "Processing failed" }
+        "capture_failed", "processing_failed", "gallery_import_failed" -> event.field("message").ifBlank { "Processing failed" }
         else -> buildString {
             append(event.event.replace('_', ' '))
             val extras = event.fields.entries
@@ -232,15 +248,31 @@ private fun terminalLine(event: LiveLogEvent): String {
 
 private fun LiveLogEvent.field(name: String): String = fields[name]?.toString().orEmpty()
 
+private fun nativeStageLabel(raw: String): String = when {
+    raw.startsWith("vision_image_encode") -> "VISION ENCODER"
+    raw.startsWith("vision_image_llm_prefill") -> "IMAGE PREFILL"
+    raw.startsWith("vision_text_prefill") -> "TEXT PREFILL"
+    raw.startsWith("vision_chunk") || raw.startsWith("vision_eval") -> "VISION + PREFILL"
+    raw.startsWith("native_tokenize") -> "BUILD VISION TOKENS"
+    raw.startsWith("generation_") -> "GENERATE SEMANTICS"
+    raw.isBlank() || raw == "idle" -> "NATIVE"
+    else -> raw.replace('_', ' ').uppercase(Locale.US)
+}
+
 private fun currentStage(events: List<LiveLogEvent>, finished: Boolean, failed: Boolean): String {
     if (finished) return if (failed) "FAILED" else "MEMORY SAVED"
     val last = events.lastOrNull() ?: return "CAPTURE"
+    if (last.event == "native_heartbeat") return nativeStageLabel(last.field("stage"))
     return when {
         last.module == "CAMERA" -> "CAPTURE"
+        last.event.startsWith("gallery_") -> "VISION INPUT"
         last.event.startsWith("model_load") -> "LOAD MODEL"
         last.module == "IMAGE" && last.event != "original_frame_destroyed" -> "VISION INPUT"
-        last.event == "inference_start" || last.event.startsWith("native_") -> "BUILD VISION TOKENS"
-        last.event.startsWith("vision_eval") -> "VISION + PREFILL"
+        last.event.startsWith("vision_image_encode") -> "VISION ENCODER"
+        last.event.startsWith("vision_image_llm_prefill") -> "IMAGE PREFILL"
+        last.event.startsWith("vision_text_prefill") -> "TEXT PREFILL"
+        last.event.startsWith("vision_chunk") || last.event.startsWith("vision_eval") -> "VISION + PREFILL"
+        last.event == "inference_start" || last.event.startsWith("native_") || last.event == "chat_template_ready" || last.event == "kv_cache_cleared" -> "BUILD VISION TOKENS"
         last.event.startsWith("generation_") -> "GENERATE SEMANTICS"
         last.event == "inference_complete" || last.event.startsWith("semantic_parse") -> "SEMANTIC PARSE"
         last.event == "encoding_start" -> "ENCODE 896D"
@@ -251,23 +283,48 @@ private fun currentStage(events: List<LiveLogEvent>, finished: Boolean, failed: 
     }
 }
 
+private fun progressForNativeStage(stage: String): Float = when {
+    stage.startsWith("vision_image_encode_complete") -> 0.56f
+    stage.startsWith("vision_image_encode") -> 0.52f
+    stage.startsWith("vision_image_llm_prefill_complete") -> 0.61f
+    stage.startsWith("vision_image_llm_prefill") -> 0.57f
+    stage.startsWith("vision_text_prefill_complete") -> 0.515f
+    stage.startsWith("vision_text_prefill") -> 0.51f
+    stage.startsWith("vision_chunk_complete") -> 0.615f
+    stage.startsWith("vision_chunk") || stage.startsWith("vision_eval") -> 0.505f
+    stage.startsWith("generation_") -> 0.63f
+    else -> 0.49f
+}
+
 private fun progressFor(events: List<LiveLogEvent>, finished: Boolean, failed: Boolean): Float {
     if (finished) return if (failed) progressFor(events, false, false).coerceAtLeast(0.08f) else 1f
     var progress = 0.03f
     events.forEach { event ->
         val eventProgress = when (event.event) {
-            "capture_requested" -> 0.05f
-            "frame_captured" -> 0.12f
+            "capture_requested", "gallery_import_requested" -> 0.05f
+            "frame_captured", "gallery_image_loaded" -> 0.12f
             "vision_frame_prepare" -> 0.16f
             "model_load_start" -> 0.20f
             "model_load_complete" -> 0.30f
             "vision_frame_prepared" -> 0.34f
             "rgb_buffer_ready" -> 0.38f
             "inference_start" -> 0.42f
+            "kv_cache_cleared" -> 0.43f
             "native_bitmap_ready" -> 0.44f
+            "chat_template_ready" -> 0.45f
             "native_tokenize_start" -> 0.46f
             "native_tokenize_complete" -> 0.49f
+            "vision_plan_ready" -> 0.495f
             "vision_eval_start" -> 0.50f
+            "vision_chunk_start", "vision_chunk_shape" -> 0.505f
+            "vision_text_prefill_start" -> 0.51f
+            "vision_text_prefill_complete" -> 0.515f
+            "vision_image_encode_start" -> 0.52f
+            "vision_image_encode_complete" -> 0.56f
+            "vision_image_llm_prefill_start" -> 0.57f
+            "vision_image_llm_prefill_complete" -> 0.61f
+            "vision_chunk_complete" -> 0.615f
+            "native_heartbeat" -> progressForNativeStage(event.field("stage"))
             "vision_eval_complete" -> 0.62f
             "generation_start" -> 0.63f
             "generation_progress" -> {
@@ -297,9 +354,12 @@ private fun progressLabel(events: List<LiveLogEvent>, finished: Boolean, failed:
     return when (currentStage(events, false, false)) {
         "CAPTURE" -> "CAPTURING REALITY"
         "LOAD MODEL" -> "LOADING GEMMA + VISION PROJECTOR"
-        "VISION INPUT" -> "PREPARING CAMERA FRAME"
+        "VISION INPUT" -> "PREPARING SOURCE IMAGE"
         "BUILD VISION TOKENS" -> "TOKENIZING IMAGE + SEMANTIC PROMPT"
-        "VISION + PREFILL" -> "RUNNING VISION ENCODER AND PREFILL"
+        "VISION ENCODER" -> "RUNNING GEMMA VISION ENCODER ON CPU"
+        "TEXT PREFILL" -> "PREFILLING TEXT TOKENS"
+        "IMAGE PREFILL" -> "PREFILLING GEMMA WITH IMAGE EMBEDDINGS"
+        "VISION + PREFILL" -> "RUNNING MULTIMODAL PREFILL"
         "GENERATE SEMANTICS" -> "GEMMA IS EMITTING COMPACT JSON"
         "SEMANTIC PARSE" -> "STRUCTURING OBJECTS AND RELATIONS"
         "ENCODE 896D" -> "ENCODING SEMANTIC VECTOR"

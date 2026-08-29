@@ -13,8 +13,11 @@ data class ModelConfig(
     val mmprojPath: String,
     val mmprojName: String,
 ) {
+    val q8Projector: Boolean
+        get() = mmprojName.contains("Q8_0", ignoreCase = true)
+
     val ready: Boolean
-        get() = modelPath.isNotBlank() && mmprojPath.isNotBlank() &&
+        get() = modelPath.isNotBlank() && mmprojPath.isNotBlank() && q8Projector &&
             File(modelPath).isFile && File(modelPath).length() > 1024L &&
             File(mmprojPath).isFile && File(mmprojPath).length() > 1024L
 }
@@ -37,6 +40,11 @@ class ModelManager(private val context: Context) {
             if (part == ModelPart.MODEL) "model.gguf" else "mmproj.gguf"
         }
         require(displayName.lowercase().endsWith(".gguf")) { "Select a .gguf file" }
+        if (part == ModelPart.MMPROJ) {
+            require(displayName.contains("Q8_0", ignoreCase = true)) {
+                "Q8_0 mmprojを選択してください。BF16 projectorはAndroidで非常に遅いため、このVulkan版では使用しません。"
+            }
+        }
 
         val target = File(modelsDir, if (part == ModelPart.MODEL) "model.gguf" else "mmproj.gguf")
         val temp = File(modelsDir, target.name + ".importing")

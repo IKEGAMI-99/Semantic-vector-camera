@@ -3,10 +3,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val releaseKeystorePath = providers.gradleProperty("SVCAM_KEYSTORE_PATH").orNull
-val releaseKeystorePassword = providers.gradleProperty("SVCAM_KEYSTORE_PASSWORD").orNull
-val releaseKeyAlias = providers.gradleProperty("SVCAM_KEY_ALIAS").orNull
-val releaseKeyPassword = providers.gradleProperty("SVCAM_KEY_PASSWORD").orNull
 val injectedVersionName = providers.environmentVariable("SVCAM_VERSION_NAME").orNull
     ?.trim()
     ?.removePrefix("v")
@@ -14,12 +10,6 @@ val injectedVersionName = providers.environmentVariable("SVCAM_VERSION_NAME").or
 val injectedVersionCode = providers.environmentVariable("SVCAM_VERSION_CODE").orNull
     ?.toIntOrNull()
     ?.coerceAtLeast(1)
-val hasReleaseSigning = listOf(
-    releaseKeystorePath,
-    releaseKeystorePassword,
-    releaseKeyAlias,
-    releaseKeyPassword,
-).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.ikegami.svcam"
@@ -49,31 +39,30 @@ android {
         }
     }
 
-    if (hasReleaseSigning) {
-        signingConfigs {
-            create("release") {
-                storeFile = file(releaseKeystorePath!!)
-                storePassword = releaseKeystorePassword
-                keyAlias = releaseKeyAlias
-                keyPassword = releaseKeyPassword
-            }
+    // Personal-distribution profile. Debug and Release intentionally share the
+    // same package id and repository-embedded signing key so either APK can
+    // overwrite the previous build and the in-app updater keeps working.
+    signingConfigs {
+        create("stableDev") {
+            storeFile = file("keys/svcam-release.jks")
+            storePassword = "svcam2026"
+            keyAlias = "svcam"
+            keyPassword = "svcam2026"
         }
     }
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("stableDev")
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("stableDev")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
         }
     }
 

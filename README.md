@@ -20,42 +20,35 @@ Semantic Vector Camera は、CameraXのフレームをGemma 4系Visionモデル�
 - JSONL診断ログ / Crash log / ZIP Export
 - GitHub Releases update checker
 - Release APKのSHA-256検証
-- 初回から同一Release keyを使い続ける署名Workflow
+- 個人配布向け固定Release key Workflow
 - Debug APKを生成するGitHub Actions CI
 
 ## Processing Console
 
-シャッターを押すと、通常のスピナーではなくターミナル風の全画面Processing Consoleへ切り替わります。
+シャッターまたはGallery画像を選ぶと、通常のスピナーではなくターミナル風の全画面Processing Consoleへ切り替わります。
 
 画面に出る内容は演出専用の疑似ログではなく、JSONL診断ログと同じ `AppLogger` のライブイベントです。
 
-表示例:
+Consoleには以下を表示します。
 
-```text
-[21:31:04.112] SESSION    Shutter accepted / semantic capture started
-[21:31:04.143] CAMERA     Frame acquired 4080x3072 rot=90
-[21:31:04.220] IMAGE      Vision input 768x1024 scaled=true
-[21:31:04.751] GEMMA      Gemma vision inference started
-[21:31:07.821] ENCODER    Scene parsed global=34 objects=7 relations=18
-[21:31:08.041] ENCODER    Vector valid 896/896 / objects=7
-[21:31:08.057] SVCAM      Semantic memory written capture_....svcam.json
-[21:31:08.063] IMAGE      Original camera Bitmap destroyed
-[21:31:08.070] SESSION    MEMORY COMPLETE / 7 objects
-```
-
-Consoleには以下も表示します。
-
+- 実際のアプリversion (`BuildConfig.VERSION_NAME`)
+- Semantic Schema (`SVCAM-896-V1`)
 - 現在Stage
 - 経過時間
 - Stageベースの進捗
 - 最大180行のライブイベント
-- 自動スクロール
+- Native heartbeat
+- Vision Encoder / Text Prefill / Image Prefill の切り分け
 - エラー内容
 - `896 / 896 VALID`
 - `ORIGINAL IMAGE DESTROYED`
 - `SEMANTIC MEMORY SAVED`
 
-処理完了または失敗するまではConsoleを閉じられません。完了後にCameraへ戻れます。
+`SVCAM-896-V1` の `V1` はアプリversionではなく、896Dデータ形式のSchema versionです。アプリversionは例えば次のように別表示します。
+
+```text
+v0.2.31-debug · SVCAM-896-V1
+```
 
 ## SVCAM-896-V1
 
@@ -142,28 +135,37 @@ cd Semantic-vector-camera
 gradle :app:assembleDebug
 ```
 
-## Release signing / app update
+Debug CI では GitHub Actions の run number から自動的に versionName / versionCode を注入します。
 
-アプリ内アップデートを成立させるには、最初の正式Releaseから同じkeystoreを使い続ける必要があります。
+```text
+versionName = 0.2.<run number>-debug
+versionCode = <run number>
+```
 
-GitHub Repository の `Settings > Secrets and variables > Actions` に以下の4つを登録してください。
+## Personal Release / app update
+
+個人配布前提なので、GitHub側で管理する署名Secretは **1個だけ**です。
 
 ```text
 ANDROID_KEYSTORE_BASE64
-ANDROID_KEYSTORE_PASSWORD
-ANDROID_KEY_ALIAS
-ANDROID_KEY_PASSWORD
 ```
 
-Release Workflow は `main` のアプリ関連ファイル更新時、または手動実行時に署名済みAPKと `.apk.sha256` を GitHub Releases の Latest Release として公開します。
+alias / password はPersonal Release Workflow側で固定しています。
 
-アプリ内Updaterは Latest Release を確認し、APKをダウンロードしてSHA-256を検証した後、Android標準Package Installerを起動します。
+```text
+alias    = svcam
+password = svcam-personal-release
+```
 
-Debug APK は `com.ikegami.svcam.debug`、Release APK は `com.ikegami.svcam` のため、最初のRelease版だけは手動インストールが必要です。その後は同じ署名鍵で作ったRelease APKへアプリ内から更新できます。
+Release Workflow は `main` のアプリ関連ファイル更新時、または手動実行時に署名済みAPKと `.apk.sha256` をGitHub ReleasesのLatestとして公開します。
 
-端末側では初回だけ Semantic Vector Camera に対して「この提供元を許可」をONにする必要があります。Updaterは必要時に該当設定画面を開きます。
+アプリ内UpdaterはLatest Releaseを確認し、APKをダウンロード、SHA-256を検証してAndroid標準Package Installerを起動します。
 
-詳細な設定手順とチェックリスト: [docs/SIGNING.md](docs/SIGNING.md)
+Debug APK は `com.ikegami.svcam.debug`、Personal Release APK は `com.ikegami.svcam` のため、最初のPersonal Releaseだけは手動インストールが必要です。以後は同じ署名鍵を使うためアプリ内更新できます。
+
+端末側では初回だけ Semantic Vector Camera に対して「この提供元を許可」をONにします。
+
+設定手順: [docs/SIGNING.md](docs/SIGNING.md)
 
 ## Diagnostics
 
@@ -173,15 +175,16 @@ Settings > Diagnostics:
 - Log clear
 - Diagnostics copy
 
-記録対象はCamera、Gemma model load/inference、Semantic Encoder、SVCAM save/share、Update、Crashです。
+記録対象はCamera、Gallery、Gemma model load/inference、Semantic Encoder、SVCAM save/share、Update、Crashです。
 
 ## Project status
 
-`0.1.0` は最初の実装です。特にlibmtmdは上流API変更が多いため、native bridgeをKotlin UI / Semantic Encoderから分離しています。
+アプリversionとSemantic Schema versionは分離しています。アプリversionはCI/Releaseごとに増えますが、互換性を維持する限りSemantic formatは `SVCAM-896-V1` のままです。
 
 今後の候補:
 
 - Vulkan acceleration
+- Vision projector最適化
 - Vector Viewer詳細表示
 - Semantic Mutation
 - 2つのVectorのBlend

@@ -75,10 +75,10 @@ class UpdateManager(private val context: Context) {
         }
 
         val newer = apkUrl.isNotBlank() && checksumUrl.isNotBlank() && isNewer(version, BuildConfig.VERSION_NAME)
-        val installable = newer && !BuildConfig.DEBUG
+        // Personal distribution profile: Debug and Release share both package id and
+        // the same embedded signing key, so either channel can install the stable APK.
+        val installable = newer
         val status = when {
-            BuildConfig.DEBUG && newer -> "DEBUG版は署名とpackageが異なるためRelease APKへ上書き更新できません。最初のRelease版だけ手動インストールしてください。以後はアプリ内更新できます。"
-            BuildConfig.DEBUG -> "DEBUG版です。Release版へ切り替えると以後アプリ内更新できます。"
             apkUrl.isBlank() -> "ReleaseにAPKがありません"
             checksumUrl.isBlank() -> "ReleaseにSHA-256ファイルがありません"
             newer -> "更新できます"
@@ -110,9 +110,6 @@ class UpdateManager(private val context: Context) {
     suspend fun downloadAndInstall(info: UpdateInfo) {
         require(info.available && info.apkUrl.isNotBlank() && info.checksumUrl.isNotBlank()) {
             "インストール可能な更新がありません"
-        }
-        require(!BuildConfig.DEBUG) {
-            "現在はDEBUG版です。Release版とはpackage/署名が違うため上書きできません。最初のRelease APKだけ手動でインストールしてください。"
         }
 
         if (!canRequestPackageInstalls()) {

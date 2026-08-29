@@ -21,9 +21,6 @@ concurrency:
   group: svcam-release
   cancel-in-progress: true
 
-env:
-  RELEASE_VERSION: 0.2.${{ github.run_number }}
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -32,6 +29,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
+
+      - name: Resolve app version
+        id: version
+        shell: bash
+        run: |
+          VERSION_CODE=$(git rev-list --count HEAD)
+          VERSION_NAME="0.2.${VERSION_CODE}"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "SVCAM_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "SVCAM_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v5
         with:
@@ -54,25 +63,22 @@ jobs:
           gradle-version: '9.5.0'
 
       - name: Build stable signed release
-        env:
-          SVCAM_VERSION_NAME: ${{ env.RELEASE_VERSION }}
-          SVCAM_VERSION_CODE: ${{ github.run_number }}
         run: |
           gradle :app:assembleRelease --stacktrace
           APK=$(find app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)
           test -n "$APK"
-          OUT="SemanticVectorCamera-v${RELEASE_VERSION}.apk"
+          OUT="SemanticVectorCamera-v${SVCAM_VERSION_NAME}.apk"
           cp "$APK" "$OUT"
           sha256sum "$OUT" > "$OUT.sha256"
 
       - name: Publish rolling GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.RELEASE_VERSION }}
-          name: Semantic Vector Camera v${{ env.RELEASE_VERSION }}
+          tag_name: v${{ steps.version.outputs.name }}
+          name: Semantic Vector Camera v${{ steps.version.outputs.name }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           make_latest: true
           files: |
-            SemanticVectorCamera-v${{ env.RELEASE_VERSION }}.apk
-            SemanticVectorCamera-v${{ env.RELEASE_VERSION }}.apk.sha256
+            SemanticVectorCamera-v${{ steps.version.outputs.name }}.apk
+            SemanticVectorCamera-v${{ steps.version.outputs.name }}.apk.sha256

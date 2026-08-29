@@ -220,10 +220,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeCreate(
         vision_params.warmup = false;
 
         // Gemma 4 supports dynamic visual token budgets (70/140/280/560/1120).
-        // Leaving these at projector metadata defaults can make a single phone capture
-        // prefill hundreds or more than a thousand image tokens through the text model,
-        // which looks exactly like a hang at mtmd_helper_eval_chunks(). SVCAM only needs
-        // coarse scene semantics, so force the smallest supported budget on mobile.
+        // SVCAM only needs coarse scene semantics, so keep the smallest supported budget.
         vision_params.image_min_tokens = 70;
         vision_params.image_max_tokens = 70;
         vision_params.batch_max_tokens = 256;
@@ -292,6 +289,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
         env->GetByteArrayRegion(rgb_j, 0, rgb_len, reinterpret_cast<jbyte *>(rgb.data()));
 
         llama_memory_clear(llama_get_memory(engine->context), true);
+        report_progress(env, bridge, "kv_cache_cleared", 0, 0, elapsed_ms(inference_start));
 
         mtmd_bitmap * bitmap = mtmd_bitmap_init(
             static_cast<uint32_t>(width),
@@ -307,6 +305,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
         const std::string prompt = jstring_to_string(env, prompt_j);
         const std::string marked = std::string(mtmd_default_marker()) + "\n" + prompt;
         const std::string formatted = format_user_prompt(engine, marked);
+        report_progress(env, bridge, "chat_template_ready", static_cast<int>(formatted.size()), static_cast<int>(prompt.size()), elapsed_ms(inference_start));
 
         mtmd_input_text text {};
         text.text = formatted.data();
@@ -324,21 +323,114 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "mtmd_tokenize failed: " + std::to_string(tokenized));
             return nullptr;
         }
+
         const int total_tokens = static_cast<int>(mtmd_helper_get_n_tokens(chunks));
-        report_progress(env, bridge, "native_tokenize_complete", total_tokens, total_tokens, elapsed_ms(inference_start));
+        const int total_positions = static_cast<int>(mtmd_helper_get_n_pos(chunks));
+        const int chunk_count = static_cast<int>(mtmd_input_chunks_size(chunks));
+        report_progress(env, bridge, "native_tokenize_complete", total_tokens, total_positions, elapsed_ms(inference_start));
+        report_progress(env, bridge, "vision_plan_ready", chunk_count, total_tokens, elapsed_ms(inference_start));
 
         llama_pos n_past = 0;
+        int32_t eval = 0;
         report_progress(env, bridge, "vision_eval_start", 0, total_tokens, elapsed_ms(inference_start));
-        const int32_t eval = mtmd_helper_eval_chunks(
-            engine->vision,
-            engine->context,
-            chunks,
-            0,
-            0,
-            engine->n_batch,
-            true,
-            &n_past
-        );
+
+        // Do not hide the expensive multimodal work behind mtmd_helper_eval_chunks().
+        // Evaluate each chunk explicitly so the terminal can show whether we are stuck in
+        // text prefill, the ViT/mmproj encoder, or image-embedding decode into the LLM.
+        for (int i = 0; i < chunk_count; ++i) {
+            const mtmd_input_chunk * chunk = mtmd_input_chunks_get(chunks, static_cast<size_t>(i));
+            if (!chunk) {
+                eval = -1;
+                break;
+            }
+
+            const auto type = mtmd_input_chunk_get_type(chunk);
+            const int chunk_tokens = static_cast<int>(mtmd_input_chunk_get_n_tokens(chunk));
+            const int chunk_positions = static_cast<int>(mtmd_input_chunk_get_n_pos(chunk));
+            report_progress(env, bridge, "vision_chunk_start", i + 1, chunk_count, elapsed_ms(inference_start));
+            report_progress(env, bridge, "vision_chunk_shape", chunk_tokens, chunk_positions, elapsed_ms(inference_start));
+
+            if (type == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+                const llama_pos before = n_past;
+                report_progress(env, bridge, "vision_text_prefill_start", chunk_tokens, chunk_positions, elapsed_ms(inference_start));
+                eval = mtmd_helper_eval_chunk_single(
+                    engine->vision,
+                    engine->context,
+                    chunk,
+                    n_past,
+                    0,
+                    engine->n_batch,
+                    i == chunk_count - 1,
+                    &n_past
+                );
+                if (eval == 0) {
+                    report_progress(
+                        env,
+                        bridge,
+                        "vision_text_prefill_complete",
+                        static_cast<int>(n_past - before),
+                        chunk_tokens,
+                        elapsed_ms(inference_start)
+                    );
+                }
+            } else if (type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+                report_progress(env, bridge, "vision_image_encode_start", chunk_tokens, chunk_positions, elapsed_ms(inference_start));
+                eval = mtmd_encode_chunk(engine->vision, chunk);
+                if (eval == 0) {
+                    report_progress(env, bridge, "vision_image_encode_complete", chunk_tokens, chunk_positions, elapsed_ms(inference_start));
+
+                    float * embd = mtmd_get_output_embd(engine->vision);
+                    if (!embd) {
+                        eval = -2;
+                    } else {
+                        const llama_pos before = n_past;
+                        llama_pos after = n_past;
+                        report_progress(env, bridge, "vision_image_llm_prefill_start", chunk_tokens, chunk_positions, elapsed_ms(inference_start));
+                        eval = mtmd_helper_decode_image_chunk(
+                            engine->vision,
+                            engine->context,
+                            chunk,
+                            embd,
+                            n_past,
+                            0,
+                            engine->n_batch,
+                            &after,
+                            nullptr,
+                            nullptr
+                        );
+                        if (eval == 0) {
+                            n_past = after;
+                            report_progress(
+                                env,
+                                bridge,
+                                "vision_image_llm_prefill_complete",
+                                static_cast<int>(n_past - before),
+                                chunk_positions,
+                                elapsed_ms(inference_start)
+                            );
+                        }
+                    }
+                }
+            } else {
+                // SVCAM currently supplies one image only, but keep a safe fallback for
+                // future audio/media chunks without losing diagnostics.
+                report_progress(env, bridge, "vision_other_chunk_start", chunk_tokens, chunk_positions, elapsed_ms(inference_start));
+                eval = mtmd_helper_eval_chunk_single(
+                    engine->vision,
+                    engine->context,
+                    chunk,
+                    n_past,
+                    0,
+                    engine->n_batch,
+                    i == chunk_count - 1,
+                    &n_past
+                );
+            }
+
+            if (eval != 0) break;
+            report_progress(env, bridge, "vision_chunk_complete", i + 1, chunk_count, elapsed_ms(inference_start));
+        }
+
         mtmd_input_chunks_free(chunks);
         mtmd_bitmap_free(bitmap);
 
@@ -346,7 +438,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "mtmd/llama evaluation failed: " + std::to_string(eval));
             return nullptr;
         }
-        report_progress(env, bridge, "vision_eval_complete", static_cast<int>(n_past), total_tokens, elapsed_ms(inference_start));
+        report_progress(env, bridge, "vision_eval_complete", static_cast<int>(n_past), total_positions, elapsed_ms(inference_start));
 
         llama_sampler * sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
@@ -362,7 +454,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             output += token_piece(engine->vocab, token);
             ++generated;
 
-            if (generated == 1 || generated % 16 == 0) {
+            if (generated == 1 || generated % 8 == 0) {
                 report_progress(env, bridge, "generation_progress", generated, max_tokens, elapsed_ms(inference_start));
             }
 

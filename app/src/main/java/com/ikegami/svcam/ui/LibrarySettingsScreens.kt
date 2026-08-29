@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ikegami.svcam.AppController
+import com.ikegami.svcam.BuildConfig
 import com.ikegami.svcam.data.CaptureEntry
 import com.ikegami.svcam.logging.AppLogger
 import com.ikegami.svcam.model.ModelPart
@@ -168,6 +169,18 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
 
         item {
             SectionCard("App Update") {
+                KeyValue("Current", BuildConfig.VERSION_NAME)
+                KeyValue("Channel", if (BuildConfig.DEBUG) "DEBUG" else "RELEASE")
+                KeyValue(
+                    "Install permission",
+                    if (controller.updateManager.canRequestPackageInstalls()) "READY" else "NEEDS ALLOW",
+                )
+                if (BuildConfig.DEBUG) {
+                    Text(
+                        "このビルドは com.ikegami.svcam.debug です。Androidの仕様上、Release版へは上書きできません。最初のRelease版だけ手動導入すれば、その後はここから更新できます。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 FilledTonalButton(
                     enabled = !busy,
                     onClick = {
@@ -176,8 +189,9 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                             try {
                                 val info = controller.updateManager.check()
                                 updateInfo = info
-                                snackbar.showSnackbar(if (info.available) "v${info.version} が利用できます" else "最新版です")
+                                snackbar.showSnackbar(info.status)
                             } catch (error: Throwable) {
+                                AppLogger.error("UPDATE", "check_failed", error)
                                 snackbar.showSnackbar(error.message ?: "Update check failed")
                             } finally {
                                 busy = false
@@ -186,8 +200,9 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                     },
                 ) { Text("GitHub Releasesを確認") }
                 updateInfo?.let { info ->
-                    KeyValue("Latest", info.version.ifBlank { "-" })
-                    if (info.available) {
+                    KeyValue("Latest", info.version.ifBlank { "未公開" })
+                    Text(info.status, style = MaterialTheme.typography.bodySmall)
+                    if (info.installable) {
                         Button(
                             enabled = !busy,
                             onClick = {
@@ -196,6 +211,7 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                                     try {
                                         controller.updateManager.downloadAndInstall(info)
                                     } catch (error: Throwable) {
+                                        AppLogger.error("UPDATE", "install_failed", error)
                                         snackbar.showSnackbar(error.message ?: "Update failed")
                                     } finally {
                                         busy = false
@@ -203,6 +219,10 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                                 }
                             },
                         ) { Text("Download & Install") }
+                    } else if (BuildConfig.DEBUG || info.available || info.version.isBlank()) {
+                        OutlinedButton(onClick = { controller.updateManager.openReleasePage() }) {
+                            Text("Releaseページを開く")
+                        }
                     }
                 }
             }

@@ -153,6 +153,11 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeCreate(
             throw_runtime(env, "The selected mmproj does not expose vision input");
             return 0;
         }
+        if (!mtmd_helper_model_can_chat(engine->context, engine->vision)) {
+            delete engine;
+            throw_runtime(env, "The selected model/mmproj pair does not support multimodal chat");
+            return 0;
+        }
 
         LOGI("Gemma GGUF + mmproj loaded");
         return reinterpret_cast<jlong>(engine);

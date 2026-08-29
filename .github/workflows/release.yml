@@ -58,6 +58,10 @@ jobs:
           sudo apt-get install -y glslc libvulkan-dev spirv-headers
           test -x /usr/bin/glslc
           test -f /usr/share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake
+          rm -rf /tmp/svcam-vulkan-headers
+          mkdir -p /tmp/svcam-vulkan-headers
+          cp -a /usr/include/vulkan /tmp/svcam-vulkan-headers/
+          test -f /tmp/svcam-vulkan-headers/vulkan/vulkan.hpp
 
       - name: Install native Android toolchain
         run: |

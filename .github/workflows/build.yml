@@ -40,6 +40,13 @@ jobs:
           cmdline-tools-version: 15859902
           packages: platform-tools
 
+      - name: Install Vulkan host toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslc libvulkan-dev spirv-headers
+          test -x /usr/bin/glslc
+          test -f /usr/share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake
+
       - name: Install native Android toolchain
         run: |
           sdkmanager \

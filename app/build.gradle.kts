@@ -7,6 +7,13 @@ val releaseKeystorePath = providers.gradleProperty("SVCAM_KEYSTORE_PATH").orNull
 val releaseKeystorePassword = providers.gradleProperty("SVCAM_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.gradleProperty("SVCAM_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.gradleProperty("SVCAM_KEY_PASSWORD").orNull
+val injectedVersionName = providers.environmentVariable("SVCAM_VERSION_NAME").orNull
+    ?.trim()
+    ?.removePrefix("v")
+    ?.takeIf { it.isNotBlank() }
+val injectedVersionCode = providers.environmentVariable("SVCAM_VERSION_CODE").orNull
+    ?.toIntOrNull()
+    ?.coerceAtLeast(1)
 val hasReleaseSigning = listOf(
     releaseKeystorePath,
     releaseKeystorePassword,
@@ -23,8 +30,8 @@ android {
         applicationId = "com.ikegami.svcam"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = injectedVersionCode ?: 1
+        versionName = injectedVersionName ?: "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

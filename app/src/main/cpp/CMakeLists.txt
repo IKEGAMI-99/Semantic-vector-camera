@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(SVCAM_ENABLE_VULKAN "Enable llama.cpp Vulkan backend" ON)
+set(SVCAM_VULKAN_HEADERS_DIR "" CACHE PATH "Isolated Vulkan-Headers include root for Android cross-builds")
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
@@ -24,6 +25,16 @@ if(NOT EXISTS "${LLAMA_CPP_DIR}/CMakeLists.txt")
 endif()
 
 add_subdirectory("${LLAMA_CPP_DIR}" "${CMAKE_BINARY_DIR}/llama.cpp-build")
+
+# Android NDK exposes the Vulkan loader but may not ship the C++ Vulkan-Hpp header
+# required by ggml-vulkan. CI passes an isolated copy containing only /vulkan/*.
+# This avoids accidentally mixing Ubuntu host libc headers into the Android target.
+if(SVCAM_ENABLE_VULKAN AND SVCAM_VULKAN_HEADERS_DIR)
+    if(NOT EXISTS "${SVCAM_VULKAN_HEADERS_DIR}/vulkan/vulkan.hpp")
+        message(FATAL_ERROR "vulkan/vulkan.hpp missing under SVCAM_VULKAN_HEADERS_DIR")
+    endif()
+    target_include_directories(ggml-vulkan PRIVATE "${SVCAM_VULKAN_HEADERS_DIR}")
+endif()
 
 # The native bridge originally used the CPU-safe profile. Keep that source readable,
 # but generate the actual Vulkan build from it so this Android profile offloads both

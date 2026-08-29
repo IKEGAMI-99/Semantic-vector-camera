@@ -4,6 +4,10 @@ import android.graphics.Bitmap
 import com.ikegami.svcam.logging.AppLogger
 import com.ikegami.svcam.model.ModelConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -76,23 +80,50 @@ class GemmaGgufEngine : VisionInferenceEngine {
             ),
         )
         try {
-            synchronized(nativeLock) {
-                check(handle != 0L) { "Gemma model is not loaded" }
-                val text = NativeGemmaBridge.nativeAnalyze(
-                    handle = handle,
-                    width = prepared.width,
-                    height = prepared.height,
-                    rgb = rgb,
-                    prompt = prompt,
-                    nPredict = MAX_PREDICT_TOKENS,
-                )
-                val duration = elapsedMs(start)
-                AppLogger.info(
-                    "GEMMA",
-                    "inference_complete",
-                    mapOf("duration_ms" to duration, "output_chars" to text.length),
-                )
-                InferenceResult(text, duration)
+            coroutineScope {
+                NativeGemmaBridge.resetProgress()
+                val heartbeat = launch(Dispatchers.IO) {
+                    while (isActive) {
+                        delay(HEARTBEAT_MS)
+                        val native = NativeGemmaBridge.progressSnapshot()
+                        if (native.event != "idle") {
+                            AppLogger.info(
+                                "GEMMA",
+                                "native_heartbeat",
+                                mapOf(
+                                    "stage" to native.event,
+                                    "current" to native.current,
+                                    "total" to native.total,
+                                    "native_elapsed_ms" to native.elapsedMs,
+                                    "wall_elapsed_ms" to elapsedMs(start),
+                                ),
+                            )
+                        }
+                    }
+                }
+
+                try {
+                    synchronized(nativeLock) {
+                        check(handle != 0L) { "Gemma model is not loaded" }
+                        val text = NativeGemmaBridge.nativeAnalyze(
+                            handle = handle,
+                            width = prepared.width,
+                            height = prepared.height,
+                            rgb = rgb,
+                            prompt = prompt,
+                            nPredict = MAX_PREDICT_TOKENS,
+                        )
+                        val duration = elapsedMs(start)
+                        AppLogger.info(
+                            "GEMMA",
+                            "inference_complete",
+                            mapOf("duration_ms" to duration, "output_chars" to text.length),
+                        )
+                        InferenceResult(text, duration)
+                    }
+                } finally {
+                    heartbeat.cancel()
+                }
             }
         } finally {
             if (prepared !== bitmap) prepared.recycle()
@@ -148,5 +179,6 @@ class GemmaGgufEngine : VisionInferenceEngine {
         const val CONTEXT_SIZE = 4096
         const val VISION_MAX_SIDE = 448
         const val MAX_PREDICT_TOKENS = 384
+        const val HEARTBEAT_MS = 2_000L
     }
 }

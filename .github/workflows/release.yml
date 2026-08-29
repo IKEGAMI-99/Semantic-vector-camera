@@ -27,10 +27,13 @@ jobs:
           cmdline-tools-version: 15859902
           packages: platform-tools
 
-      - name: Install Android SDK 37
+      - name: Install Android toolchain
         run: |
-          android --sdk="$ANDROID_HOME" sdk install platforms/android-37 build-tools/36.0.0
-          sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"
+          sdkmanager \
+            "platforms;android-37" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -54,6 +57,8 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SVCAM_VERSION_NAME: ${{ github.ref_name }}
+          SVCAM_VERSION_CODE: ${{ github.run_number }}
         run: |
           gradle :app:assembleRelease --stacktrace \
             -PSVCAM_KEYSTORE_PATH="$RUNNER_TEMP/svcam-release.jks" \

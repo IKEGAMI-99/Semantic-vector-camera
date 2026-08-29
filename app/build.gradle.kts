@@ -10,6 +10,7 @@ val injectedVersionName = providers.environmentVariable("SVCAM_VERSION_NAME").or
 val injectedVersionCode = providers.environmentVariable("SVCAM_VERSION_CODE").orNull
     ?.toIntOrNull()
     ?.coerceAtLeast(1)
+val isGitHubActions = providers.environmentVariable("GITHUB_ACTIONS").orNull == "true"
 
 android {
     namespace = "com.ikegami.svcam"
@@ -33,8 +34,16 @@ android {
             cmake {
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    "-DSVCAM_ENABLE_VULKAN=OFF",
+                    "-DSVCAM_ENABLE_VULKAN=ON",
                 )
+                // GitHub Actions installs the host shader compiler / SPIR-V headers.
+                // Local desktop builds can instead rely on their installed Vulkan SDK.
+                if (isGitHubActions) {
+                    arguments += listOf(
+                        "-DVulkan_GLSLC_EXECUTABLE=/usr/bin/glslc",
+                        "-DSPIRV-Headers_DIR=/usr/share/cmake/SPIRV-Headers",
+                    )
+                }
             }
         }
     }

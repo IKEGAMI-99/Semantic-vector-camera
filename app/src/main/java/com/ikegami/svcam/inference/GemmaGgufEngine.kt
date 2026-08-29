@@ -9,55 +9,67 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 class GemmaGgufEngine : VisionInferenceEngine {
+    private val nativeLock = Any()
     private var handle: Long = 0L
     private var loadedKey: String? = null
 
     override suspend fun ensureLoaded(config: ModelConfig) = withContext(Dispatchers.IO) {
         require(config.ready) { "Import both Gemma GGUF and its mmproj GGUF in Settings" }
         val key = "${config.modelPath}|${config.mmprojPath}"
-        if (handle != 0L && loadedKey == key) return@withContext
 
-        close()
-        val threads = max(2, Runtime.getRuntime().availableProcessors() - 2)
-        AppLogger.info("GEMMA", "model_load_start", mapOf("model" to config.modelName, "mmproj" to config.mmprojName, "threads" to threads))
-        val start = System.nanoTime()
-        handle = NativeGemmaBridge.nativeCreate(
-            modelPath = config.modelPath,
-            mmprojPath = config.mmprojPath,
-            nThreads = threads,
-            nCtx = 8192,
-        )
-        check(handle != 0L) { "Native Gemma engine returned a null handle" }
-        loadedKey = key
-        AppLogger.info("GEMMA", "model_load_complete", mapOf("duration_ms" to elapsedMs(start)))
+        synchronized(nativeLock) {
+            if (handle != 0L && loadedKey == key) return@synchronized
+
+            closeLocked()
+            val threads = max(2, Runtime.getRuntime().availableProcessors() - 2).coerceAtMost(8)
+            AppLogger.info("GEMMA", "model_load_start", mapOf("model" to config.modelName, "mmproj" to config.mmprojName, "threads" to threads))
+            val start = System.nanoTime()
+            handle = NativeGemmaBridge.nativeCreate(
+                modelPath = config.modelPath,
+                mmprojPath = config.mmprojPath,
+                nThreads = threads,
+                nCtx = 8192,
+            )
+            check(handle != 0L) { "Native Gemma engine returned a null handle" }
+            loadedKey = key
+            AppLogger.info("GEMMA", "model_load_complete", mapOf("duration_ms" to elapsedMs(start)))
+        }
     }
 
     override suspend fun analyze(bitmap: Bitmap, prompt: String): InferenceResult = withContext(Dispatchers.Default) {
-        check(handle != 0L) { "Gemma model is not loaded" }
         val prepared = scaleForVision(bitmap)
         val rgb = bitmapToRgb(prepared)
         val start = System.nanoTime()
         AppLogger.info("GEMMA", "inference_start", mapOf("width" to prepared.width, "height" to prepared.height))
         try {
-            val text = NativeGemmaBridge.nativeAnalyze(
-                handle = handle,
-                width = prepared.width,
-                height = prepared.height,
-                rgb = rgb,
-                prompt = prompt,
-                nPredict = 1200,
-            )
-            val duration = elapsedMs(start)
-            AppLogger.info("GEMMA", "inference_complete", mapOf("duration_ms" to duration, "output_chars" to text.length))
-            InferenceResult(text, duration)
+            synchronized(nativeLock) {
+                check(handle != 0L) { "Gemma model is not loaded" }
+                val text = NativeGemmaBridge.nativeAnalyze(
+                    handle = handle,
+                    width = prepared.width,
+                    height = prepared.height,
+                    rgb = rgb,
+                    prompt = prompt,
+                    nPredict = 1200,
+                )
+                val duration = elapsedMs(start)
+                AppLogger.info("GEMMA", "inference_complete", mapOf("duration_ms" to duration, "output_chars" to text.length))
+                InferenceResult(text, duration)
+            }
         } finally {
             if (prepared !== bitmap) prepared.recycle()
         }
     }
 
-    override fun isLoaded(): Boolean = handle != 0L
+    override fun isLoaded(): Boolean = synchronized(nativeLock) { handle != 0L }
 
     override fun close() {
+        synchronized(nativeLock) {
+            closeLocked()
+        }
+    }
+
+    private fun closeLocked() {
         if (handle != 0L) {
             runCatching { NativeGemmaBridge.nativeDestroy(handle) }
             handle = 0L

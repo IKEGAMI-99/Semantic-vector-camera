@@ -23,8 +23,6 @@ concurrency:
 
 env:
   RELEASE_VERSION: 0.2.${{ github.run_number }}
-  PERSONAL_KEY_ALIAS: svcam
-  PERSONAL_KEY_PASSWORD: svcam-personal-release
 
 jobs:
   release:
@@ -55,25 +53,12 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      # Personal-distribution profile: only the keystore bytes stay secret.
-      # Alias/password are fixed project constants so there is only one GitHub Secret to manage.
-      - name: Restore personal signing key
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          test -n "$KEYSTORE_B64" || (echo "ANDROID_KEYSTORE_BASE64 is missing" && exit 1)
-          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/svcam-release.jks"
-
-      - name: Build signed personal release
+      - name: Build stable signed release
         env:
           SVCAM_VERSION_NAME: ${{ env.RELEASE_VERSION }}
           SVCAM_VERSION_CODE: ${{ github.run_number }}
         run: |
-          gradle :app:assembleRelease --stacktrace \
-            -PSVCAM_KEYSTORE_PATH="$RUNNER_TEMP/svcam-release.jks" \
-            -PSVCAM_KEYSTORE_PASSWORD="$PERSONAL_KEY_PASSWORD" \
-            -PSVCAM_KEY_ALIAS="$PERSONAL_KEY_ALIAS" \
-            -PSVCAM_KEY_PASSWORD="$PERSONAL_KEY_PASSWORD"
+          gradle :app:assembleRelease --stacktrace
           APK=$(find app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)
           test -n "$APK"
           OUT="SemanticVectorCamera-v${RELEASE_VERSION}.apk"

@@ -170,17 +170,16 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
         item {
             SectionCard("App Update") {
                 KeyValue("Current", BuildConfig.VERSION_NAME)
-                KeyValue("Channel", if (BuildConfig.DEBUG) "DEBUG" else "RELEASE")
+                KeyValue("Channel", if (BuildConfig.DEBUG) "SIGNED DEBUG" else "RELEASE")
+                KeyValue("Package", context.packageName)
                 KeyValue(
                     "Install permission",
                     if (controller.updateManager.canRequestPackageInstalls()) "READY" else "NEEDS ALLOW",
                 )
-                if (BuildConfig.DEBUG) {
-                    Text(
-                        "このビルドは com.ikegami.svcam.debug です。Androidの仕様上、Release版へは上書きできません。最初のRelease版だけ手動導入すれば、その後はここから更新できます。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                Text(
+                    "Debug/Releaseとも同じpackageと署名鍵を使う個人配布モードです。新しいGitHub Releaseへそのまま上書き更新できます。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 FilledTonalButton(
                     enabled = !busy,
                     onClick = {
@@ -216,10 +215,9 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                                     } finally {
                                         busy = false
                                     }
-                                }
-                            },
+                                },
                         ) { Text("Download & Install") }
-                    } else if (BuildConfig.DEBUG || info.available || info.version.isBlank()) {
+                    } else if (info.available || info.version.isBlank()) {
                         OutlinedButton(onClick = { controller.updateManager.openReleasePage() }) {
                             Text("Releaseページを開く")
                         }

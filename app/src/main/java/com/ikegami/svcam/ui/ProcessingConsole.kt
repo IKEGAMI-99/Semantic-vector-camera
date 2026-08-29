@@ -199,7 +199,16 @@ private fun terminalLine(event: LiveLogEvent): String {
         "rgb_buffer_ready" -> "RGB buffer ready bytes=${event.field("bytes")}"
         "model_load_start" -> "Loading ${event.field("model")} / projector ${event.field("mmproj")}"
         "model_load_complete" -> "Model ready in ${event.field("duration_ms")} ms"
-        "inference_start" -> "Gemma vision inference started"
+        "inference_start" -> "Gemma vision inference started / max ${event.field("n_predict")} tokens"
+        "native_bitmap_ready" -> "Native bitmap ready / ${event.field("elapsed_ms")} ms"
+        "native_tokenize_start" -> "Tokenizing multimodal prompt"
+        "native_tokenize_complete" -> "Multimodal prompt tokenized / ${event.field("elapsed_ms")} ms"
+        "vision_eval_start" -> "Vision encoder + prompt prefill started"
+        "vision_eval_complete" -> "Vision/prefill complete / n_past=${event.field("current")} / ${event.field("elapsed_ms")} ms"
+        "generation_start" -> "Semantic JSON generation started / max=${event.field("total")}"
+        "generation_progress" -> "Generating JSON token ${event.field("current")}/${event.field("total")} / ${event.field("elapsed_ms")} ms"
+        "generation_json_complete" -> "Complete JSON detected at token ${event.field("current")} / stopping early"
+        "generation_complete" -> "JSON generation complete tokens=${event.field("current")} / ${event.field("elapsed_ms")} ms"
         "inference_complete" -> "Inference complete ${event.field("duration_ms")} ms / ${event.field("output_chars")} chars"
         "semantic_parse_start" -> "Parsing structured scene JSON"
         "semantic_parse_complete" -> "Scene parsed global=${event.field("global_scores")} objects=${event.field("objects")} relations=${event.field("relation_scores")}"
@@ -230,7 +239,9 @@ private fun currentStage(events: List<LiveLogEvent>, finished: Boolean, failed: 
         last.module == "CAMERA" -> "CAPTURE"
         last.event.startsWith("model_load") -> "LOAD MODEL"
         last.module == "IMAGE" && last.event != "original_frame_destroyed" -> "VISION INPUT"
-        last.event == "inference_start" -> "UNDERSTAND SCENE"
+        last.event == "inference_start" || last.event.startsWith("native_") -> "BUILD VISION TOKENS"
+        last.event.startsWith("vision_eval") -> "VISION + PREFILL"
+        last.event.startsWith("generation_") -> "GENERATE SEMANTICS"
         last.event == "inference_complete" || last.event.startsWith("semantic_parse") -> "SEMANTIC PARSE"
         last.event == "encoding_start" -> "ENCODE 896D"
         last.event == "vector_valid" -> "VALIDATE 896D"
@@ -244,28 +255,39 @@ private fun progressFor(events: List<LiveLogEvent>, finished: Boolean, failed: B
     if (finished) return if (failed) progressFor(events, false, false).coerceAtLeast(0.08f) else 1f
     var progress = 0.03f
     events.forEach { event ->
-        progress = maxOf(
-            progress,
-            when (event.event) {
-                "capture_requested" -> 0.05f
-                "frame_captured" -> 0.12f
-                "vision_frame_prepare" -> 0.16f
-                "model_load_start" -> 0.20f
-                "model_load_complete" -> 0.30f
-                "vision_frame_prepared" -> 0.34f
-                "rgb_buffer_ready" -> 0.38f
-                "inference_start" -> 0.43f
-                "inference_complete" -> 0.70f
-                "semantic_parse_start" -> 0.74f
-                "semantic_parse_complete" -> 0.79f
-                "encoding_start" -> 0.83f
-                "vector_valid" -> 0.92f
-                "capture_saved" -> 0.97f
-                "original_frame_destroyed" -> 0.99f
-                "semantic_memory_complete" -> 1f
-                else -> progress
-            },
-        )
+        val eventProgress = when (event.event) {
+            "capture_requested" -> 0.05f
+            "frame_captured" -> 0.12f
+            "vision_frame_prepare" -> 0.16f
+            "model_load_start" -> 0.20f
+            "model_load_complete" -> 0.30f
+            "vision_frame_prepared" -> 0.34f
+            "rgb_buffer_ready" -> 0.38f
+            "inference_start" -> 0.42f
+            "native_bitmap_ready" -> 0.44f
+            "native_tokenize_start" -> 0.46f
+            "native_tokenize_complete" -> 0.49f
+            "vision_eval_start" -> 0.50f
+            "vision_eval_complete" -> 0.62f
+            "generation_start" -> 0.63f
+            "generation_progress" -> {
+                val current = event.field("current").toFloatOrNull() ?: 0f
+                val total = event.field("total").toFloatOrNull()?.coerceAtLeast(1f) ?: 1f
+                0.63f + 0.06f * (current / total).coerceIn(0f, 1f)
+            }
+            "generation_json_complete" -> 0.695f
+            "generation_complete" -> 0.70f
+            "inference_complete" -> 0.72f
+            "semantic_parse_start" -> 0.75f
+            "semantic_parse_complete" -> 0.80f
+            "encoding_start" -> 0.84f
+            "vector_valid" -> 0.92f
+            "capture_saved" -> 0.97f
+            "original_frame_destroyed" -> 0.99f
+            "semantic_memory_complete" -> 1f
+            else -> progress
+        }
+        progress = maxOf(progress, eventProgress)
     }
     return progress
 }
@@ -275,8 +297,10 @@ private fun progressLabel(events: List<LiveLogEvent>, finished: Boolean, failed:
     return when (currentStage(events, false, false)) {
         "CAPTURE" -> "CAPTURING REALITY"
         "LOAD MODEL" -> "LOADING GEMMA + VISION PROJECTOR"
-        "VISION INPUT" -> "PREPARING VISION TOKENS"
-        "UNDERSTAND SCENE" -> "GEMMA IS INTERPRETING THE FRAME"
+        "VISION INPUT" -> "PREPARING CAMERA FRAME"
+        "BUILD VISION TOKENS" -> "TOKENIZING IMAGE + SEMANTIC PROMPT"
+        "VISION + PREFILL" -> "RUNNING VISION ENCODER AND PREFILL"
+        "GENERATE SEMANTICS" -> "GEMMA IS EMITTING COMPACT JSON"
         "SEMANTIC PARSE" -> "STRUCTURING OBJECTS AND RELATIONS"
         "ENCODE 896D" -> "ENCODING SEMANTIC VECTOR"
         "VALIDATE 896D" -> "VALIDATING DIMENSIONS"

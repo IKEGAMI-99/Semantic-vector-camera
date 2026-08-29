@@ -219,6 +219,15 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeCreate(
         vision_params.print_timings = false;
         vision_params.warmup = false;
 
+        // Gemma 4 supports dynamic visual token budgets (70/140/280/560/1120).
+        // Leaving these at projector metadata defaults can make a single phone capture
+        // prefill hundreds or more than a thousand image tokens through the text model,
+        // which looks exactly like a hang at mtmd_helper_eval_chunks(). SVCAM only needs
+        // coarse scene semantics, so force the smallest supported budget on mobile.
+        vision_params.image_min_tokens = 70;
+        vision_params.image_max_tokens = 70;
+        vision_params.batch_max_tokens = 256;
+
         engine->vision = mtmd_init_from_file(mmproj_path.c_str(), engine->model, vision_params);
         if (!engine->vision) {
             delete engine;
@@ -236,7 +245,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeCreate(
             return 0;
         }
 
-        LOGI("Gemma GGUF + mmproj loaded");
+        LOGI("Gemma GGUF + mmproj loaded (image token budget: 70)");
         return reinterpret_cast<jlong>(engine);
     } catch (const std::exception & e) {
         throw_runtime(env, std::string("Native model load failed: ") + e.what());
@@ -315,10 +324,11 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "mtmd_tokenize failed: " + std::to_string(tokenized));
             return nullptr;
         }
-        report_progress(env, bridge, "native_tokenize_complete", 1, 1, elapsed_ms(inference_start));
+        const int total_tokens = static_cast<int>(mtmd_helper_get_n_tokens(chunks));
+        report_progress(env, bridge, "native_tokenize_complete", total_tokens, total_tokens, elapsed_ms(inference_start));
 
         llama_pos n_past = 0;
-        report_progress(env, bridge, "vision_eval_start", 0, 1, elapsed_ms(inference_start));
+        report_progress(env, bridge, "vision_eval_start", 0, total_tokens, elapsed_ms(inference_start));
         const int32_t eval = mtmd_helper_eval_chunks(
             engine->vision,
             engine->context,
@@ -336,7 +346,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "mtmd/llama evaluation failed: " + std::to_string(eval));
             return nullptr;
         }
-        report_progress(env, bridge, "vision_eval_complete", static_cast<int>(n_past), static_cast<int>(n_past), elapsed_ms(inference_start));
+        report_progress(env, bridge, "vision_eval_complete", static_cast<int>(n_past), total_tokens, elapsed_ms(inference_start));
 
         llama_sampler * sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());

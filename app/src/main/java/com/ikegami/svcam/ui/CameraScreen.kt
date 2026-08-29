@@ -1,7 +1,11 @@
 package com.ikegami.svcam.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
@@ -45,9 +49,14 @@ import com.ikegami.svcam.data.CaptureEntry
 import com.ikegami.svcam.logging.AppLogger
 import com.ikegami.svcam.logging.LiveLogEvent
 import com.ikegami.svcam.sharing.ShareHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
+import kotlin.math.roundToInt
+
+private const val GALLERY_DECODE_MAX_SIDE = 1024
 
 @Composable
 internal fun CameraScreen(controller: AppController, snackbar: SnackbarHostState) {
@@ -69,6 +78,78 @@ internal fun CameraScreen(controller: AppController, snackbar: SnackbarHostState
     var status by remember { mutableStateOf("READY / 896D") }
     var lastCapture by remember { mutableStateOf<CaptureEntry?>(null) }
     val model = controller.modelManager.current()
+
+    fun beginSession(initialStatus: String) {
+        sessionStartedAt = Instant.now()
+        terminalEvents = emptyList()
+        processingFailed = false
+        processingFinished = false
+        processing = true
+        status = initialStatus
+    }
+
+    suspend fun finishFailure(error: Throwable, failureStatus: String) {
+        AppLogger.error("SESSION", "processing_failed", error)
+        status = failureStatus
+        processingFailed = true
+        processingFinished = true
+        snackbar.showSnackbar(error.message ?: error::class.java.simpleName)
+    }
+
+    suspend fun processBitmap(bitmap: Bitmap) {
+        status = "UNDERSTANDING"
+        try {
+            val entry = controller.encodeCapture(bitmap)
+            lastCapture = entry
+            status = "MEMORY SAVED / 896D"
+            AppLogger.info(
+                "SESSION",
+                "semantic_memory_complete",
+                mapOf(
+                    "objects" to entry.objectCount,
+                    "file" to entry.file.name,
+                ),
+            )
+            processingFinished = true
+        } catch (error: Throwable) {
+            finishFailure(error, "ENCODE FAILED")
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null || processing) return@rememberLauncherForActivityResult
+
+        beginSession("IMPORTING GALLERY")
+        AppLogger.info(
+            "SESSION",
+            "gallery_import_requested",
+            mapOf(
+                "schema" to "SVCAM-896-V1",
+                "uri_scheme" to uri.scheme.orEmpty(),
+            ),
+        )
+
+        scope.launch {
+            val bitmap = try {
+                withContext(Dispatchers.IO) { decodeGalleryBitmap(context, uri) }
+            } catch (error: Throwable) {
+                AppLogger.error("IMAGE", "gallery_import_failed", error)
+                finishFailure(error, "IMPORT FAILED")
+                return@launch
+            }
+
+            AppLogger.info(
+                "IMAGE",
+                "gallery_image_loaded",
+                mapOf(
+                    "width" to bitmap.width,
+                    "height" to bitmap.height,
+                    "config" to bitmap.config?.name.orEmpty(),
+                ),
+            )
+            processBitmap(bitmap)
+        }
+    }
 
     DisposableEffect(source) { onDispose { source.close() } }
 
@@ -107,6 +188,10 @@ internal fun CameraScreen(controller: AppController, snackbar: SnackbarHostState
                 ) {
                     Text("カメラ権限が必要です")
                     Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) { Text("許可する") }
+                    Text(
+                        "Galleryからの読み込みはカメラ権限なしでも使えます",
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    )
                 }
             }
 
@@ -125,77 +210,53 @@ internal fun CameraScreen(controller: AppController, snackbar: SnackbarHostState
             }
         }
 
-        Row(
-            Modifier.fillMaxWidth().padding(18.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                enabled = lastCapture != null && !processing,
-                onClick = { lastCapture?.let { ShareHelper.shareCapture(context, it.file) } },
-            ) { Text("Share Decode") }
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    enabled = lastCapture != null && !processing,
+                    onClick = { lastCapture?.let { ShareHelper.shareCapture(context, it.file) } },
+                ) { Text("Share Decode") }
 
-            Button(
-                modifier = Modifier.size(82.dp).clip(CircleShape),
-                enabled = permissionGranted && model.ready && !processing,
-                onClick = {
-                    sessionStartedAt = Instant.now()
-                    terminalEvents = emptyList()
-                    processingFailed = false
-                    processingFinished = false
-                    processing = true
-                    status = "CAPTURING REALITY"
-                    AppLogger.info(
-                        "SESSION",
-                        "capture_requested",
-                        mapOf("schema" to "SVCAM-896-V1"),
-                    )
+                Button(
+                    modifier = Modifier.size(82.dp).clip(CircleShape),
+                    enabled = permissionGranted && model.ready && !processing,
+                    onClick = {
+                        beginSession("CAPTURING REALITY")
+                        AppLogger.info(
+                            "SESSION",
+                            "capture_requested",
+                            mapOf("schema" to "SVCAM-896-V1"),
+                        )
 
-                    source.requestFrame { frameResult ->
-                        scope.launch {
-                            val bitmap = frameResult.getOrElse { error ->
-                                AppLogger.error("SESSION", "processing_failed", error)
-                                status = "CAPTURE FAILED"
-                                processingFailed = true
-                                processingFinished = true
-                                snackbar.showSnackbar(error.message ?: "Capture failed")
-                                return@launch
-                            }
-
-                            status = "UNDERSTANDING"
-                            try {
-                                val entry = controller.encodeCapture(bitmap)
-                                lastCapture = entry
-                                status = "MEMORY SAVED / 896D"
-                                AppLogger.info(
-                                    "SESSION",
-                                    "semantic_memory_complete",
-                                    mapOf(
-                                        "objects" to entry.objectCount,
-                                        "file" to entry.file.name,
-                                    ),
-                                )
-                                processingFinished = true
-                            } catch (error: Throwable) {
-                                AppLogger.error("SESSION", "processing_failed", error)
-                                status = "ENCODE FAILED"
-                                processingFailed = true
-                                processingFinished = true
-                                snackbar.showSnackbar(error.message ?: error::class.java.simpleName)
+                        source.requestFrame { frameResult ->
+                            scope.launch {
+                                val bitmap = frameResult.getOrElse { error ->
+                                    finishFailure(error, "CAPTURE FAILED")
+                                    return@launch
+                                }
+                                processBitmap(bitmap)
                             }
                         }
-                    }
-                },
-            ) { Text("896D") }
+                    },
+                ) { Text("896D") }
 
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                Text(if (lastCapture == null) "NO MEMORY" else "LAST SAVED")
-                Text(
-                    lastCapture?.let { "${it.objectCount} objects" } ?: "元画像は保存しません",
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                )
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    enabled = model.ready && !processing,
+                    onClick = { galleryLauncher.launch("image/*") },
+                ) { Text("Gallery") }
             }
+
+            Text(
+                lastCapture?.let { "LAST SAVED · ${it.objectCount} objects" } ?: "NO MEMORY · 元画像は保存しません",
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+            )
         }
     }
 
@@ -222,6 +283,24 @@ internal fun CameraScreen(controller: AppController, snackbar: SnackbarHostState
                     processing = false
                     terminalEvents = emptyList()
                 },
+            )
+        }
+    }
+}
+
+private fun decodeGalleryBitmap(context: Context, uri: Uri): Bitmap {
+    val source = ImageDecoder.createSource(context.contentResolver, uri)
+    return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+        decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE)
+
+        val width = info.size.width
+        val height = info.size.height
+        val maxSide = maxOf(width, height)
+        if (maxSide > GALLERY_DECODE_MAX_SIDE) {
+            val scale = GALLERY_DECODE_MAX_SIDE.toFloat() / maxSide.toFloat()
+            decoder.setTargetSize(
+                (width * scale).roundToInt().coerceAtLeast(1),
+                (height * scale).roundToInt().coerceAtLeast(1),
             )
         }
     }

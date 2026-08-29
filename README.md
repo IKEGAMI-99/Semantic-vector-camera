@@ -13,6 +13,7 @@ Semantic Vector Camera は、CameraXのフレームをGemma 4系Visionモデル�
 - Gemma GGUF + mmproj GGUFを端末からImport
 - llama.cpp / libmtmd JNI backend
 - Gemmaの疎なSemantic JSONを固定896Dへ決定論的にEncode
+- 処理中は実ログ連動の全画面Processing Consoleを表示
 - `.svcam.json` Vector Library
 - 共有ファイル + Decode用プロンプトをAndroid Share Sheetへ送信
 - JSONL診断ログ / Crash log / ZIP Export
@@ -20,6 +21,40 @@ Semantic Vector Camera は、CameraXのフレームをGemma 4系Visionモデル�
 - Release APKのSHA-256検証
 - 初回から同一Release keyを使い続ける署名Workflow
 - Debug APKを生成するGitHub Actions CI
+
+## Processing Console
+
+シャッターを押すと、通常のスピナーではなくターミナル風の全画面Processing Consoleへ切り替わります。
+
+画面に出る内容は演出専用の疑似ログではなく、JSONL診断ログと同じ `AppLogger` のライブイベントです。
+
+表示例:
+
+```text
+[21:31:04.112] SESSION    Shutter accepted / semantic capture started
+[21:31:04.143] CAMERA     Frame acquired 4080x3072 rot=90
+[21:31:04.220] IMAGE      Vision input 768x1024 scaled=true
+[21:31:04.751] GEMMA      Gemma vision inference started
+[21:31:07.821] ENCODER    Scene parsed global=34 objects=7 relations=18
+[21:31:08.041] ENCODER    Vector valid 896/896 / objects=7
+[21:31:08.057] SVCAM      Semantic memory written capture_....svcam.json
+[21:31:08.063] IMAGE      Original camera Bitmap destroyed
+[21:31:08.070] SESSION    MEMORY COMPLETE / 7 objects
+```
+
+Consoleには以下も表示します。
+
+- 現在Stage
+- 経過時間
+- Stageベースの進捗
+- 最大180行のライブイベント
+- 自動スクロール
+- エラー内容
+- `896 / 896 VALID`
+- `ORIGINAL IMAGE DESTROYED`
+- `SEMANTIC MEMORY SAVED`
+
+処理完了または失敗するまではConsoleを閉じられません。完了後にCameraへ戻れます。
 
 ## SVCAM-896-V1
 

@@ -25,7 +25,24 @@ class AppController(context: Context) : AutoCloseable {
         try {
             engine.ensureLoaded(config)
             val inference = engine.analyze(bitmap, SemanticPrompt.build())
+
+            AppLogger.info(
+                "ENCODER",
+                "semantic_parse_start",
+                mapOf("output_chars" to inference.rawText.length),
+            )
             val scene = StructuredScene.parse(inference.rawText)
+            AppLogger.info(
+                "ENCODER",
+                "semantic_parse_complete",
+                mapOf(
+                    "global_scores" to scene.global.size,
+                    "objects" to scene.objects.size,
+                    "relation_scores" to scene.relations.size,
+                ),
+            )
+
+            AppLogger.info("ENCODER", "encoding_start", mapOf("schema" to "SVCAM-896-V1"))
             val vector = SemanticEncoder.encode(scene)
             val flat = vector.flatten()
             check(flat.size == 896) { "Semantic Vector dimension mismatch: ${flat.size}" }
@@ -44,6 +61,7 @@ class AppController(context: Context) : AutoCloseable {
                     "mean" to mean,
                 ),
             )
+
             return repository.save(
                 vector = vector,
                 modelName = config.modelName,
@@ -54,7 +72,10 @@ class AppController(context: Context) : AutoCloseable {
             AppLogger.error("ENCODER", "capture_failed", t)
             throw t
         } finally {
-            if (!bitmap.isRecycled) bitmap.recycle()
+            if (!bitmap.isRecycled) {
+                bitmap.recycle()
+                AppLogger.info("IMAGE", "original_frame_destroyed")
+            }
         }
     }
 

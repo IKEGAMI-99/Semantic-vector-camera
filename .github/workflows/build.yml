@@ -9,9 +9,6 @@ on:
 permissions:
   contents: read
 
-env:
-  DEBUG_VERSION: 0.2.${{ github.run_number }}
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,6 +17,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
+
+      - name: Resolve app version
+        id: version
+        shell: bash
+        run: |
+          VERSION_CODE=$(git rev-list --count HEAD)
+          VERSION_NAME="0.2.${VERSION_CODE}"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "SVCAM_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "SVCAM_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v5
         with:
@@ -42,19 +51,13 @@ jobs:
           gradle-version: '9.5.0'
 
       - name: Unit tests
-        env:
-          SVCAM_VERSION_NAME: ${{ env.DEBUG_VERSION }}
-          SVCAM_VERSION_CODE: ${{ github.run_number }}
         run: gradle :app:testDebugUnitTest --stacktrace
 
-      - name: Build debug APK
-        env:
-          SVCAM_VERSION_NAME: ${{ env.DEBUG_VERSION }}
-          SVCAM_VERSION_CODE: ${{ github.run_number }}
+      - name: Build signed debug APK
         run: gradle :app:assembleDebug --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SemanticVectorCamera-v${{ env.DEBUG_VERSION }}-debug
+          name: SemanticVectorCamera-v${{ steps.version.outputs.name }}-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

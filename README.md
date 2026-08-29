@@ -20,7 +20,8 @@ Semantic Vector Camera は、CameraXのフレームをGemma 4系Visionモデル�
 - JSONL診断ログ / Crash log / ZIP Export
 - GitHub Releases update checker
 - Release APKのSHA-256検証
-- 個人配布向け固定Release key Workflow
+- 個人配布向け固定署名鍵
+- Debug / Release共通package・共通署名
 - Debug APKを生成するGitHub Actions CI
 
 ## Processing Console
@@ -47,7 +48,7 @@ Consoleには以下を表示します。
 `SVCAM-896-V1` の `V1` はアプリversionではなく、896Dデータ形式のSchema versionです。アプリversionは例えば次のように別表示します。
 
 ```text
-v0.2.31-debug · SVCAM-896-V1
+v0.2.37 · SVCAM-896-V1
 ```
 
 ## SVCAM-896-V1
@@ -138,34 +139,30 @@ gradle :app:assembleDebug
 Debug CI では GitHub Actions の run number から自動的に versionName / versionCode を注入します。
 
 ```text
-versionName = 0.2.<run number>-debug
+versionName = 0.2.<run number>
 versionCode = <run number>
 ```
 
 ## Personal Release / app update
 
-個人配布前提なので、GitHub側で管理する署名Secretは **1個だけ**です。
+個人配布前提なので、署名鍵をリポジトリ内に固定しています。GitHub Secrets / Base64 は不要です。
 
 ```text
-ANDROID_KEYSTORE_BASE64
-```
-
-alias / password はPersonal Release Workflow側で固定しています。
-
-```text
+keystore = app/keys/svcam-release.jks
 alias    = svcam
-password = svcam-personal-release
+password = svcam2026
+package  = com.ikegami.svcam
 ```
+
+Debug / Releaseとも同じpackage idと同じ署名鍵を使います。そのためDebugからReleaseを含め、同じアプリとして上書き更新できます。
 
 Release Workflow は `main` のアプリ関連ファイル更新時、または手動実行時に署名済みAPKと `.apk.sha256` をGitHub ReleasesのLatestとして公開します。
 
 アプリ内UpdaterはLatest Releaseを確認し、APKをダウンロード、SHA-256を検証してAndroid標準Package Installerを起動します。
 
-Debug APK は `com.ikegami.svcam.debug`、Personal Release APK は `com.ikegami.svcam` のため、最初のPersonal Releaseだけは手動インストールが必要です。以後は同じ署名鍵を使うためアプリ内更新できます。
-
 端末側では初回だけ Semantic Vector Camera に対して「この提供元を許可」をONにします。
 
-設定手順: [docs/SIGNING.md](docs/SIGNING.md)
+詳細: [docs/SIGNING.md](docs/SIGNING.md)
 
 ## Diagnostics
 

@@ -1,100 +1,46 @@
 # Personal release signing / in-app update
 
-Semantic Vector Camera は個人配布前提なので、署名設定を最小化しています。
+Semantic Vector Camera は個人配布前提なので、AI-VECTOR-GAME と同じく固定の署名鍵をリポジトリ内に置く方式です。
 
-必要な GitHub Secret は **1個だけ**です。
-
-```text
-ANDROID_KEYSTORE_BASE64
-```
-
-alias と password は Personal Release Workflow 側で固定しています。
+GitHub Secrets / Base64 は使いません。
 
 ```text
+keystore = app/keys/svcam-release.jks
 alias    = svcam
-password = svcam-personal-release
+password = svcam2026
+package  = com.ikegami.svcam
 ```
 
-Android は package 名と署名が同じ APK だけを既存アプリへの更新として受け入れます。そのため、最初に作った `svcam-release.jks` は今後も同じものを使い続けます。
+Debug / Release の両方を同じ package id と同じ鍵で署名します。
 
-## 1. 署名鍵を一度だけ作る
+## 仕組み
 
-Termux / Linux / macOS など `keytool` が使える環境で実行します。
-
-```bash
-keytool -genkeypair -v \
-  -keystore svcam-release.jks \
-  -storetype JKS \
-  -alias svcam \
-  -keyalg RSA \
-  -keysize 4096 \
-  -validity 10000 \
-  -storepass 'svcam-personal-release' \
-  -keypass 'svcam-personal-release' \
-  -dname "CN=Semantic Vector Camera, OU=Android, O=IKEGAMI-99, C=JP"
-```
-
-この `svcam-release.jks` は Git にコミットしません。バックアップだけ取ってください。
-
-## 2. Base64 にする
-
-Termux / Linux:
-
-```bash
-base64 -w 0 svcam-release.jks > svcam-release.jks.b64
-```
-
-macOS:
-
-```bash
-base64 -i svcam-release.jks | tr -d '\n' > svcam-release.jks.b64
-```
-
-表示:
-
-```bash
-cat svcam-release.jks.b64
-```
-
-## 3. GitHub Secret を1個だけ登録
-
-Repository:
+`app/build.gradle.kts` の `stableDev` signing config が `app/keys/svcam-release.jks` を直接読み込みます。
 
 ```text
-Settings
-→ Secrets and variables
-→ Actions
-→ New repository secret
+Debug APK
+  package: com.ikegami.svcam
+  key:     app/keys/svcam-release.jks
+
+Release APK
+  package: com.ikegami.svcam
+  key:     app/keys/svcam-release.jks
 ```
 
-Name:
+そのためDebugからRelease、Releaseから次のReleaseへそのままAndroidの上書き更新ができます。
+
+## GitHub Actions
+
+`main` に変更が入るとRelease Workflowが自動で以下を行います。
 
 ```text
-ANDROID_KEYSTORE_BASE64
-```
-
-Value:
-
-```text
-svcam-release.jks.b64 の中身全部
-```
-
-これで署名設定は終了です。
-
-## 4. 以後は自動
-
-`main` にアプリ関連の変更が入ると Release Workflow が自動で以下を実行します。
-
-```text
-同じ署名鍵を復元
-↓
 versionName / versionCode を自動更新
 ↓
-Release APK をビルド
+固定署名鍵でRelease APKをビルド
 ↓
-SHA-256 を作成
+SHA-256を作成
 ↓
-GitHub Latest Release に公開
+GitHub Latest Releaseへ公開
 ```
 
 公開物:
@@ -104,38 +50,28 @@ SemanticVectorCamera-v0.2.x.apk
 SemanticVectorCamera-v0.2.x.apk.sha256
 ```
 
-アプリ内Updaterは Latest Release を確認して、APKをダウンロード、SHA-256確認後にAndroid標準インストーラを起動します。
+アプリ内UpdaterはLatest Releaseを確認し、APKをダウンロード、SHA-256検証後にAndroid標準Package Installerを起動します。
 
-## 最初の1回だけ
+## 端末側で必要なこと
 
-Debug APK は `com.ikegami.svcam.debug`、Personal Release は `com.ikegami.svcam` なので、最初の移行だけ上書きできません。
+初回だけSemantic Vector Cameraに対してAndroidの「この提供元を許可」をONにします。
 
-```text
-Debug版をアンインストール
-↓
-最初のPersonal Release APKを手動インストール
-↓
-以後はアプリ内アップデート
-```
-
-Android側では初回だけ「この提供元を許可」をONにしてください。
+以後はSettingsのApp Updateから更新できます。
 
 ## バージョン表記
 
-`SVCAM-896-V1` の `V1` は **アプリのバージョンではなく896DフォーマットのSchema version** です。
+`SVCAM-896-V1` の `V1` はアプリversionではなく896DフォーマットのSchema versionです。
 
-アプリの実際のバージョンは `BuildConfig.VERSION_NAME` を使い、Processing Console と Settings に例えば次のように表示します。
-
-```text
-v0.2.31-debug · SVCAM-896-V1
-```
-
-Debug CI / Personal Release とも、GitHub Actions の run number から versionName / versionCode を自動更新します。
-
-## 絶対に消さないもの
+実際のアプリversionは `BuildConfig.VERSION_NAME` を使います。
 
 ```text
-svcam-release.jks
+v0.2.37 · SVCAM-896-V1
 ```
 
-これだけは安全な場所にバックアップしてください。同じ鍵を失うと、既にインストール済みのPersonal Releaseへ上書き更新できなくなります。
+Debug CI / Release ともGitHub Actionsのrun numberからversionName / versionCodeを自動更新します。
+
+## 注意
+
+この署名鍵とpasswordは公開リポジトリから取得可能です。Play Store配布や第三者へ安全な署名保証を提供する用途には使いません。
+
+個人配布専用の更新互換性を優先した構成です。

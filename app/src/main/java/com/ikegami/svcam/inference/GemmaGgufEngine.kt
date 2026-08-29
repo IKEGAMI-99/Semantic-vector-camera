@@ -22,13 +22,22 @@ class GemmaGgufEngine : VisionInferenceEngine {
 
             closeLocked()
             val threads = max(2, Runtime.getRuntime().availableProcessors() - 2).coerceAtMost(8)
-            AppLogger.info("GEMMA", "model_load_start", mapOf("model" to config.modelName, "mmproj" to config.mmprojName, "threads" to threads))
+            AppLogger.info(
+                "GEMMA",
+                "model_load_start",
+                mapOf(
+                    "model" to config.modelName,
+                    "mmproj" to config.mmprojName,
+                    "threads" to threads,
+                    "n_ctx" to CONTEXT_SIZE,
+                ),
+            )
             val start = System.nanoTime()
             handle = NativeGemmaBridge.nativeCreate(
                 modelPath = config.modelPath,
                 mmprojPath = config.mmprojPath,
                 nThreads = threads,
-                nCtx = 8192,
+                nCtx = CONTEXT_SIZE,
             )
             check(handle != 0L) { "Native Gemma engine returned a null handle" }
             loadedKey = key
@@ -50,13 +59,22 @@ class GemmaGgufEngine : VisionInferenceEngine {
                 "width" to prepared.width,
                 "height" to prepared.height,
                 "scaled" to (prepared !== bitmap),
+                "max_side" to VISION_MAX_SIDE,
             ),
         )
         val rgb = bitmapToRgb(prepared)
         AppLogger.info("IMAGE", "rgb_buffer_ready", mapOf("bytes" to rgb.size))
 
         val start = System.nanoTime()
-        AppLogger.info("GEMMA", "inference_start", mapOf("width" to prepared.width, "height" to prepared.height))
+        AppLogger.info(
+            "GEMMA",
+            "inference_start",
+            mapOf(
+                "width" to prepared.width,
+                "height" to prepared.height,
+                "n_predict" to MAX_PREDICT_TOKENS,
+            ),
+        )
         try {
             synchronized(nativeLock) {
                 check(handle != 0L) { "Gemma model is not loaded" }
@@ -66,10 +84,14 @@ class GemmaGgufEngine : VisionInferenceEngine {
                     height = prepared.height,
                     rgb = rgb,
                     prompt = prompt,
-                    nPredict = 1200,
+                    nPredict = MAX_PREDICT_TOKENS,
                 )
                 val duration = elapsedMs(start)
-                AppLogger.info("GEMMA", "inference_complete", mapOf("duration_ms" to duration, "output_chars" to text.length))
+                AppLogger.info(
+                    "GEMMA",
+                    "inference_complete",
+                    mapOf("duration_ms" to duration, "output_chars" to text.length),
+                )
                 InferenceResult(text, duration)
             }
         } finally {
@@ -95,8 +117,8 @@ class GemmaGgufEngine : VisionInferenceEngine {
 
     private fun scaleForVision(bitmap: Bitmap): Bitmap {
         val maxSide = max(bitmap.width, bitmap.height)
-        if (maxSide <= 1024) return bitmap
-        val ratio = 1024f / maxSide.toFloat()
+        if (maxSide <= VISION_MAX_SIDE) return bitmap
+        val ratio = VISION_MAX_SIDE.toFloat() / maxSide.toFloat()
         return Bitmap.createScaledBitmap(
             bitmap,
             (bitmap.width * ratio).roundToInt().coerceAtLeast(1),
@@ -119,4 +141,12 @@ class GemmaGgufEngine : VisionInferenceEngine {
     }
 
     private fun elapsedMs(start: Long): Long = (System.nanoTime() - start) / 1_000_000L
+
+    private companion object {
+        // The original 8192 ctx / 1200-token / 1024px profile is needlessly expensive
+        // for the app's sparse JSON schema on a phone. These values are the mobile-safe profile.
+        const val CONTEXT_SIZE = 4096
+        const val VISION_MAX_SIDE = 448
+        const val MAX_PREDICT_TOKENS = 384
+    }
 }

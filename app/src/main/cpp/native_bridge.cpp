@@ -6,6 +6,7 @@
 #include "mtmd-helper.h"
 
 #include <algorithm>
+#include <chrono>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -55,6 +56,44 @@ void throw_runtime(JNIEnv * env, const std::string & message) {
     if (cls) env->ThrowNew(cls, message.c_str());
 }
 
+using Clock = std::chrono::steady_clock;
+
+long elapsed_ms(const Clock::time_point & start) {
+    return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count());
+}
+
+void report_progress(
+    JNIEnv * env,
+    jobject bridge,
+    const char * event,
+    int current,
+    int total,
+    long elapsed
+) {
+    if (!env || !bridge || !event || env->ExceptionCheck()) return;
+    jclass cls = env->GetObjectClass(bridge);
+    if (!cls) return;
+    jmethodID method = env->GetMethodID(cls, "onNativeProgress", "(Ljava/lang/String;IIJ)V");
+    if (!method) {
+        env->DeleteLocalRef(cls);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    jstring event_j = env->NewStringUTF(event);
+    if (event_j) {
+        env->CallVoidMethod(
+            bridge,
+            method,
+            event_j,
+            static_cast<jint>(current),
+            static_cast<jint>(total),
+            static_cast<jlong>(elapsed)
+        );
+        env->DeleteLocalRef(event_j);
+    }
+    env->DeleteLocalRef(cls);
+}
+
 std::string token_piece(const llama_vocab * vocab, llama_token token) {
     char small[256];
     int n = llama_token_to_piece(vocab, token, small, sizeof(small), 0, true);
@@ -89,6 +128,44 @@ std::string format_user_prompt(Engine * engine, const std::string & user_content
     return std::string(buffer.data(), static_cast<size_t>(written));
 }
 
+bool has_complete_json_object(const std::string & text) {
+    bool started = false;
+    bool in_string = false;
+    bool escaped = false;
+    int depth = 0;
+
+    for (char c : text) {
+        if (!started) {
+            if (c == '{') {
+                started = true;
+                depth = 1;
+            }
+            continue;
+        }
+
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '{') {
+            ++depth;
+        } else if (c == '}') {
+            --depth;
+            if (depth == 0) return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -112,7 +189,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeCreate(
         auto * engine = new Engine();
 
         llama_model_params model_params = llama_model_default_params();
-        model_params.n_gpu_layers = 0; // CPU-safe baseline. Vulkan offload is enabled in a later profile.
+        model_params.n_gpu_layers = 0; // CPU-safe baseline. Keep Vulkan as a separate build profile.
         engine->model = llama_model_load_from_file(model_path.c_str(), model_params);
         if (!engine->model) {
             delete engine;
@@ -173,7 +250,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeCreate(
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
     JNIEnv * env,
-    jobject,
+    jobject bridge,
     jlong handle,
     jint width,
     jint height,
@@ -192,6 +269,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
     }
 
     std::lock_guard<std::mutex> lock(engine->mutex);
+    const auto inference_start = Clock::now();
 
     try {
         const jsize rgb_len = env->GetArrayLength(rgb_j);
@@ -215,6 +293,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "Failed to create mtmd bitmap");
             return nullptr;
         }
+        report_progress(env, bridge, "native_bitmap_ready", 1, 1, elapsed_ms(inference_start));
 
         const std::string prompt = jstring_to_string(env, prompt_j);
         const std::string marked = std::string(mtmd_default_marker()) + "\n" + prompt;
@@ -228,6 +307,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
 
         mtmd_input_chunks * chunks = mtmd_input_chunks_init();
         const mtmd_bitmap * bitmap_array[1] = { bitmap };
+        report_progress(env, bridge, "native_tokenize_start", 0, 1, elapsed_ms(inference_start));
         const int32_t tokenized = mtmd_tokenize(engine->vision, chunks, &text, bitmap_array, 1);
         if (tokenized != 0) {
             mtmd_input_chunks_free(chunks);
@@ -235,8 +315,10 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "mtmd_tokenize failed: " + std::to_string(tokenized));
             return nullptr;
         }
+        report_progress(env, bridge, "native_tokenize_complete", 1, 1, elapsed_ms(inference_start));
 
         llama_pos n_past = 0;
+        report_progress(env, bridge, "vision_eval_start", 0, 1, elapsed_ms(inference_start));
         const int32_t eval = mtmd_helper_eval_chunks(
             engine->vision,
             engine->context,
@@ -254,17 +336,32 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             throw_runtime(env, "mtmd/llama evaluation failed: " + std::to_string(eval));
             return nullptr;
         }
+        report_progress(env, bridge, "vision_eval_complete", static_cast<int>(n_past), static_cast<int>(n_past), elapsed_ms(inference_start));
 
         llama_sampler * sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
         std::string output;
-        const int max_tokens = std::clamp(static_cast<int>(n_predict), 32, 2048);
+        const int max_tokens = std::clamp(static_cast<int>(n_predict), 32, 1024);
+        report_progress(env, bridge, "generation_start", 0, max_tokens, elapsed_ms(inference_start));
+        int generated = 0;
         for (int i = 0; i < max_tokens; ++i) {
             llama_token token = llama_sampler_sample(sampler, engine->context, -1);
             if (llama_vocab_is_eog(engine->vocab, token)) break;
 
             output += token_piece(engine->vocab, token);
+            ++generated;
+
+            if (generated == 1 || generated % 16 == 0) {
+                report_progress(env, bridge, "generation_progress", generated, max_tokens, elapsed_ms(inference_start));
+            }
+
+            // The prompt requires exactly one JSON object. Once its top-level brace closes,
+            // continuing to generate only wastes battery and often adds invalid commentary.
+            if (has_complete_json_object(output)) {
+                report_progress(env, bridge, "generation_json_complete", generated, max_tokens, elapsed_ms(inference_start));
+                break;
+            }
 
             llama_batch batch = llama_batch_get_one(&token, 1);
             const int decode = llama_decode(engine->context, batch);
@@ -275,6 +372,7 @@ Java_com_ikegami_svcam_inference_NativeGemmaBridge_nativeAnalyze(
             }
         }
         llama_sampler_free(sampler);
+        report_progress(env, bridge, "generation_complete", generated, max_tokens, elapsed_ms(inference_start));
 
         return env->NewStringUTF(output.c_str());
     } catch (const std::exception & e) {

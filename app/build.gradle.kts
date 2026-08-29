@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 val releaseKeystorePath = providers.gradleProperty("SVCAM_KEYSTORE_PATH").orNull

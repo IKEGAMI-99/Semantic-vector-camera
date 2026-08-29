@@ -121,7 +121,7 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
             controller.unloadModel()
             try {
                 model = controller.modelManager.import(uri, part)
-                snackbar.showSnackbar(if (part == ModelPart.MODEL) "Model GGUFを読み込みました" else "mmproj GGUFを読み込みました")
+                snackbar.showSnackbar(if (part == ModelPart.MODEL) "Model GGUFを読み込みました" else "Q8_0 mmproj GGUFを読み込みました")
             } catch (error: Throwable) {
                 snackbar.showSnackbar(error.message ?: "GGUF import failed")
             } finally {
@@ -141,13 +141,19 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
             SectionCard("Vision Model") {
                 KeyValue("Model", model.modelName.ifBlank { "未設定" })
                 KeyValue("mmproj", model.mmprojName.ifBlank { "未設定" })
-                KeyValue("Status", if (model.ready) "READY" else "2 files required")
+                KeyValue("Projector", if (model.q8Projector) "Q8_0" else "Q8_0 REQUIRED")
+                KeyValue("Backend", "VULKAN")
+                KeyValue("Status", if (model.ready) "READY" else "MODEL + Q8_0 MMPROJ REQUIRED")
+                Text(
+                    "この版はBF16 projectorを使用しません。Gemma 4 E4B用のQ8_0 mmprojを読み込んでください。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(enabled = !busy, onClick = { modelPicker.launch(arrayOf("*/*")) }) { Text("Model GGUF") }
-                    Button(enabled = !busy, onClick = { mmprojPicker.launch(arrayOf("*/*")) }) { Text("mmproj GGUF") }
+                    Button(enabled = !busy, onClick = { mmprojPicker.launch(arrayOf("*/*")) }) { Text("Q8_0 mmproj") }
                 }
                 OutlinedButton(
-                    enabled = !busy && model.ready,
+                    enabled = !busy && (model.modelPath.isNotBlank() || model.mmprojPath.isNotBlank()),
                     onClick = {
                         controller.unloadModel()
                         controller.modelManager.clear()
@@ -215,7 +221,8 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                                     } finally {
                                         busy = false
                                     }
-                                },
+                                }
+                            },
                         ) { Text("Download & Install") }
                     } else if (info.available || info.version.isBlank()) {
                         OutlinedButton(onClick = { controller.updateManager.openReleasePage() }) {

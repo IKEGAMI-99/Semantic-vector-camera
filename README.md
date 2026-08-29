@@ -9,6 +9,7 @@ Semantic Vector Camera は、CameraXのフレームをGemma 4系Visionモデル�
 ## 現在のMVP
 
 - CameraXリアカメラPreview
+- Galleryから画像を選択して896Dへ変換
 - 撮影フレームはRAM上だけで処理し、元画像を通常保存しない
 - Gemma GGUF + mmproj GGUFを端末からImport
 - llama.cpp / libmtmd JNI backend
@@ -69,7 +70,7 @@ TOTAL            896D
 Gemmaに896個の数値を直接自由生成させません。
 
 ```text
-Camera frame
+Camera frame / Gallery image
   ↓
 Gemma 4 Vision
   ↓
@@ -109,6 +110,8 @@ Vector Libraryまたは撮影直後の `Share Decode` から `.svcam.json` を�
 
 通常撮影では元画像をファイルへ保存しません。CameraXから得たBitmapはGemma推論とEncode終了後に破棄します。
 
+Galleryから読み込んだ場合も、アプリがデコードしたRAM上のBitmapだけを破棄します。端末のGalleryにある元ファイルそのものは削除しません。
+
 ログにも以下を保存しません。
 
 - 撮影画像
@@ -141,13 +144,26 @@ gradle :app:assembleDebug
 
 ## Release signing / app update
 
-正式Releaseを一度公開した後に署名鍵を変えると、Android上では同一アプリとして上書き更新できません。
+アプリ内アップデートを成立させるには、最初の正式Releaseから同じkeystoreを使い続ける必要があります。
 
-そのためRelease Workflowは最初から固定keystoreをGitHub Actions Secretsから読み込む設計です。秘密鍵はリポジトリへ入れません。
+GitHub Repository の `Settings > Secrets and variables > Actions` に以下の4つを登録してください。
 
-設定方法: [docs/SIGNING.md](docs/SIGNING.md)
+```text
+ANDROID_KEYSTORE_BASE64
+ANDROID_KEYSTORE_PASSWORD
+ANDROID_KEY_ALIAS
+ANDROID_KEY_PASSWORD
+```
 
-Tag `v*` をpushすると、署名済みAPKと `.apk.sha256` をReleaseへ添付します。アプリ内UpdaterはSHA-256を検証した後、Android標準Package Installerを起動します。
+Release Workflow は `main` のアプリ関連ファイル更新時、または手動実行時に署名済みAPKと `.apk.sha256` を GitHub Releases の Latest Release として公開します。
+
+アプリ内Updaterは Latest Release を確認し、APKをダウンロードしてSHA-256を検証した後、Android標準Package Installerを起動します。
+
+Debug APK は `com.ikegami.svcam.debug`、Release APK は `com.ikegami.svcam` のため、最初のRelease版だけは手動インストールが必要です。その後は同じ署名鍵で作ったRelease APKへアプリ内から更新できます。
+
+端末側では初回だけ Semantic Vector Camera に対して「この提供元を許可」をONにする必要があります。Updaterは必要時に該当設定画面を開きます。
+
+詳細な設定手順とチェックリスト: [docs/SIGNING.md](docs/SIGNING.md)
 
 ## Diagnostics
 

@@ -4,7 +4,7 @@ project(svcam_native LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(SVCAM_ENABLE_VULKAN "Enable llama.cpp Vulkan backend" OFF)
+option(SVCAM_ENABLE_VULKAN "Enable llama.cpp Vulkan backend" ON)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
@@ -25,7 +25,35 @@ endif()
 
 add_subdirectory("${LLAMA_CPP_DIR}" "${CMAKE_BINARY_DIR}/llama.cpp-build")
 
-add_library(svcam_native SHARED native_bridge.cpp)
+# The native bridge originally used the CPU-safe profile. Keep that source readable,
+# but generate the actual Vulkan build from it so this Android profile offloads both
+# the Gemma transformer layers and mtmd vision encoder to the Vulkan backend.
+set(SVCAM_NATIVE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/native_bridge.cpp")
+if(SVCAM_ENABLE_VULKAN)
+    file(READ "${SVCAM_NATIVE_SOURCE}" SVCAM_NATIVE_CONTENT)
+    string(REPLACE
+        "model_params.n_gpu_layers = 0; // CPU-safe baseline. Keep Vulkan as a separate build profile."
+        "model_params.n_gpu_layers = 999; // Vulkan profile: offload all supported transformer layers."
+        SVCAM_NATIVE_CONTENT
+        "${SVCAM_NATIVE_CONTENT}"
+    )
+    string(REPLACE
+        "vision_params.use_gpu = false;"
+        "vision_params.use_gpu = true;"
+        SVCAM_NATIVE_CONTENT
+        "${SVCAM_NATIVE_CONTENT}"
+    )
+    string(REPLACE
+        "LOGI(\"Gemma GGUF + mmproj loaded (image token budget: 70)\");"
+        "LOGI(\"Gemma GGUF + Q8_0 mmproj loaded (Vulkan GPU, image token budget: 70)\");"
+        SVCAM_NATIVE_CONTENT
+        "${SVCAM_NATIVE_CONTENT}"
+    )
+    set(SVCAM_NATIVE_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/native_bridge_vulkan.cpp")
+    file(WRITE "${SVCAM_NATIVE_SOURCE}" "${SVCAM_NATIVE_CONTENT}")
+endif()
+
+add_library(svcam_native SHARED "${SVCAM_NATIVE_SOURCE}")
 
 target_include_directories(svcam_native PRIVATE
     "${LLAMA_CPP_DIR}/include"

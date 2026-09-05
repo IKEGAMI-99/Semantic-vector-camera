@@ -118,8 +118,8 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
         if (uri == null) return
         scope.launch {
             busy = true
-            controller.unloadModel()
             try {
+                controller.unloadModel()
                 model = controller.modelManager.import(uri, part)
                 snackbar.showSnackbar(if (part == ModelPart.MODEL) "Model GGUFを読み込みました" else "Q8_0 mmproj GGUFを読み込みました")
             } catch (error: Throwable) {
@@ -155,9 +155,16 @@ internal fun SettingsScreen(controller: AppController, snackbar: SnackbarHostSta
                 OutlinedButton(
                     enabled = !busy && (model.modelPath.isNotBlank() || model.mmprojPath.isNotBlank()),
                     onClick = {
-                        controller.unloadModel()
-                        controller.modelManager.clear()
-                        model = controller.modelManager.current()
+                        scope.launch {
+                            busy = true
+                            try {
+                                controller.unloadModel()
+                                controller.modelManager.clear()
+                                model = controller.modelManager.current()
+                            } finally {
+                                busy = false
+                            }
+                        }
                     },
                 ) { Text("モデルを削除") }
             }

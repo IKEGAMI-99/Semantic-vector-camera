@@ -112,7 +112,7 @@ class GemmaGgufEngine : VisionInferenceEngine {
                             rgb = rgb,
                             prompt = prompt,
                             nPredict = MAX_PREDICT_TOKENS,
-                        )
+                        ).toString(Charsets.UTF_8)
                         val duration = elapsedMs(start)
                         AppLogger.info(
                             "GEMMA",
@@ -174,11 +174,11 @@ class GemmaGgufEngine : VisionInferenceEngine {
     private fun elapsedMs(start: Long): Long = (System.nanoTime() - start) / 1_000_000L
 
     private companion object {
-        // The original 8192 ctx / 1200-token / 1024px profile is needlessly expensive
-        // for the app's sparse JSON schema on a phone. These values are the mobile-safe profile.
+        // Keep vision/context memory bounded; native code caps generation to the
+        // remaining context and stops immediately when the constrained JSON closes.
         const val CONTEXT_SIZE = 4096
         const val VISION_MAX_SIDE = 448
-        const val MAX_PREDICT_TOKENS = 384
+        const val MAX_PREDICT_TOKENS = 2048
         const val HEARTBEAT_MS = 2_000L
     }
 }

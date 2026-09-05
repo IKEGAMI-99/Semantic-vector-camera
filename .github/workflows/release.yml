@@ -60,8 +60,9 @@ jobs:
           test -f /usr/share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake
           rm -rf /tmp/svcam-vulkan-headers
           mkdir -p /tmp/svcam-vulkan-headers
-          cp -a /usr/include/vulkan /tmp/svcam-vulkan-headers/
+          cp -a /usr/include/vulkan /usr/include/spirv /tmp/svcam-vulkan-headers/
           test -f /tmp/svcam-vulkan-headers/vulkan/vulkan.hpp
+          test -f /tmp/svcam-vulkan-headers/spirv/unified1/spirv.hpp
 
       - name: Install native Android toolchain
         run: |

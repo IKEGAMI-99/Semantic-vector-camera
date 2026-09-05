@@ -19,6 +19,12 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Native inference regression tests
+        run: |
+          cmake -S tests/native -B /tmp/svcam-native-tests -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/svcam-native-tests --target svcam_inference_test -j 2
+          ctest --test-dir /tmp/svcam-native-tests --output-on-failure
+
       - name: Resolve app version
         id: version
         shell: bash
@@ -48,8 +54,9 @@ jobs:
           test -f /usr/share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake
           rm -rf /tmp/svcam-vulkan-headers
           mkdir -p /tmp/svcam-vulkan-headers
-          cp -a /usr/include/vulkan /tmp/svcam-vulkan-headers/
+          cp -a /usr/include/vulkan /usr/include/spirv /tmp/svcam-vulkan-headers/
           test -f /tmp/svcam-vulkan-headers/vulkan/vulkan.hpp
+          test -f /tmp/svcam-vulkan-headers/spirv/unified1/spirv.hpp
 
       - name: Install native Android toolchain
         run: |

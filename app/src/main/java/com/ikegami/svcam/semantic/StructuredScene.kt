@@ -13,10 +13,11 @@ data class StructuredScene(
         fun parse(raw: String): StructuredScene {
             val jsonText = extractJson(raw)
             val root = JSONObject(jsonText)
+            // Never save a thought/example or an incomplete response as an empty vector.
             return StructuredScene(
-                global = root.optJSONObject("global").toFloatMap(),
-                objects = root.optJSONArray("objects").toObjects(),
-                relations = root.optJSONObject("relations").toFloatMap(),
+                global = root.getJSONObject("global").toFloatMap(),
+                objects = root.getJSONArray("objects").toObjects(),
+                relations = root.getJSONObject("relations").toFloatMap(),
             )
         }
 

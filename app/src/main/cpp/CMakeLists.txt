@@ -33,6 +33,9 @@ if(SVCAM_ENABLE_VULKAN AND SVCAM_VULKAN_HEADERS_DIR)
     if(NOT EXISTS "${SVCAM_VULKAN_HEADERS_DIR}/vulkan/vulkan.hpp")
         message(FATAL_ERROR "vulkan/vulkan.hpp missing under SVCAM_VULKAN_HEADERS_DIR")
     endif()
+    if(NOT EXISTS "${SVCAM_VULKAN_HEADERS_DIR}/spirv/unified1/spirv.hpp")
+        message(FATAL_ERROR "SPIR-V headers missing under SVCAM_VULKAN_HEADERS_DIR")
+    endif()
     target_include_directories(ggml-vulkan PRIVATE "${SVCAM_VULKAN_HEADERS_DIR}")
 endif()
 
@@ -46,35 +49,8 @@ if(SVCAM_ENABLE_VULKAN AND ANDROID)
     )
 endif()
 
-# The native bridge originally used the CPU-safe profile. Keep that source readable,
-# but generate the actual Vulkan build from it so this Android profile offloads both
-# the Gemma transformer layers and mtmd vision encoder to the Vulkan backend.
-set(SVCAM_NATIVE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/native_bridge.cpp")
-if(SVCAM_ENABLE_VULKAN)
-    file(READ "${SVCAM_NATIVE_SOURCE}" SVCAM_NATIVE_CONTENT)
-    string(REPLACE
-        "model_params.n_gpu_layers = 0; // CPU-safe baseline. Keep Vulkan as a separate build profile."
-        "model_params.n_gpu_layers = 999; // Vulkan profile: offload all supported transformer layers."
-        SVCAM_NATIVE_CONTENT
-        "${SVCAM_NATIVE_CONTENT}"
-    )
-    string(REPLACE
-        "vision_params.use_gpu = false;"
-        "vision_params.use_gpu = true;"
-        SVCAM_NATIVE_CONTENT
-        "${SVCAM_NATIVE_CONTENT}"
-    )
-    string(REPLACE
-        "LOGI(\"Gemma GGUF + mmproj loaded (image token budget: 70)\");"
-        "LOGI(\"Gemma GGUF + Q8_0 mmproj loaded (Vulkan GPU, image token budget: 70)\");"
-        SVCAM_NATIVE_CONTENT
-        "${SVCAM_NATIVE_CONTENT}"
-    )
-    set(SVCAM_NATIVE_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/native_bridge_vulkan.cpp")
-    file(WRITE "${SVCAM_NATIVE_SOURCE}" "${SVCAM_NATIVE_CONTENT}")
-endif()
-
-add_library(svcam_native SHARED "${SVCAM_NATIVE_SOURCE}")
+add_library(svcam_native SHARED "native_bridge.cpp")
+target_compile_definitions(svcam_native PRIVATE SVCAM_ENABLE_VULKAN=$<BOOL:${SVCAM_ENABLE_VULKAN}>)
 
 target_include_directories(svcam_native PRIVATE
     "${LLAMA_CPP_DIR}/include"

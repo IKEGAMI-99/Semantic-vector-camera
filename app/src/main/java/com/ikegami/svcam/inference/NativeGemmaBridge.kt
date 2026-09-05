@@ -36,7 +36,7 @@ object NativeGemmaBridge {
         rgb: ByteArray,
         prompt: String,
         nPredict: Int,
-    ): String
+    ): ByteArray
 
     external fun nativeDestroy(handle: Long)
 

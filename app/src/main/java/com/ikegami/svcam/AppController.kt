@@ -2,6 +2,10 @@ package com.ikegami.svcam
 
 import android.content.Context
 import android.graphics.Bitmap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.ikegami.svcam.data.CaptureEntry
 import com.ikegami.svcam.data.SvcamRepository
 import com.ikegami.svcam.inference.GemmaGgufEngine
@@ -79,7 +83,11 @@ class AppController(context: Context) : AutoCloseable {
         }
     }
 
-    fun unloadModel() = engine.close()
+    suspend fun unloadModel() = withContext(Dispatchers.IO) { engine.close() }
 
-    override fun close() = engine.close()
+    // Native inference holds its lock until the current graph finishes. Activity
+    // destruction must never wait for that lock on Android's main thread (ANR).
+    override fun close() {
+        CoroutineScope(Dispatchers.IO).launch { engine.close() }
+    }
 }

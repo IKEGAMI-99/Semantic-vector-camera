@@ -221,6 +221,8 @@ private fun terminalLine(event: LiveLogEvent): String {
         "vision_chunk_complete" -> "Chunk ${event.field("current")}/${event.field("total")} complete"
         "native_heartbeat" -> "Still working / ${nativeStageLabel(event.field("stage"))} / wall=${event.field("wall_elapsed_ms")} ms"
         "vision_eval_complete" -> "Vision/prefill complete / n_past=${event.field("current")} / ${event.field("elapsed_ms")} ms"
+        "generation_budget_ready" -> "JSON budget=${event.field("current")} / prompt positions=${event.field("total")}"
+        "generation_incomplete" -> "JSON incomplete at ${event.field("current")}/${event.field("total")} tokens / capture not saved"
         "generation_start" -> "Semantic JSON generation started / max=${event.field("total")}"
         "generation_progress" -> "Generating JSON token ${event.field("current")}/${event.field("total")} / ${event.field("elapsed_ms")} ms"
         "generation_json_complete" -> "Complete JSON detected at token ${event.field("current")} / stopping early"

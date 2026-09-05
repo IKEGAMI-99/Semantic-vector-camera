@@ -14,6 +14,8 @@ The app will deterministically map your sparse semantic values into ${SemanticSc
 Every numeric value MUST be between 0.0 and 1.0.
 Omit weak/irrelevant fields rather than filling everything. Missing labels become 0.
 For global and relations, include values roughly >= 0.15.
+Use at most 16 global scores, 8 relation scores, and 8 scores per object.
+Use at most 3 decimal places. Prefer a few strong observations over filling the limits.
 For objects, return at most 8 important and diverse objects in descending visual importance. Unused object slots become zero vectors.
 Avoid repeated instances of the same category unless those instances are genuinely important.
 Object bbox is normalized [center_x, center_y, width, height], with image top-left=(0,0), bottom-right=(1,1).
